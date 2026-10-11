@@ -1,0 +1,304 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id               String            @id @default(uuid())
+  username         String            @unique
+  passwordHash     String
+  role             String            @default("admin") // "admin" | "user"
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  lastLoginAt      DateTime?
+
+  stats            UserTrackStats[]
+  sessions         PlaybackSession[]
+  events           PlaybackEvent[]
+  playlists        Playlist[]
+  lastFmAccounts   LastFmAccount[]
+}
+
+model LibraryRoot {
+  id            String    @id @default(uuid())
+  name          String
+  path          String    @unique
+  isEnabled     Boolean   @default(true)
+  isReadOnly    Boolean   @default(true)
+  lastScannedAt DateTime?
+  trackCount    Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tracks        Track[]
+}
+
+model Artist {
+  id             String   @id @default(uuid())
+  name           String   @unique
+  normalizedName String
+  bio            String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  tracks         Track[]
+  albums         Album[]
+}
+
+model Album {
+  id              String    @id @default(uuid())
+  title           String
+  normalizedTitle String
+  artistId        String?
+  artist          Artist?   @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  year            Int?
+  totalTracks     Int?
+  totalDiscs      Int?
+  artworkId       String?
+  artwork         Artwork?  @relation(fields: [artworkId], references: [id], onDelete: SetNull)
+  // Stable identity derived from the album directory: "<rootId>:<artist folder>/<album folder>" (lowercased).
+  // Albums without a folder identity fall back to title/artist/year.
+  folderKey       String?   @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tracks          Track[]
+
+  @@unique([title, artistId, year])
+}
+
+model Track {
+  id                   String       @id @default(uuid())
+  rootId               String
+  root                 LibraryRoot  @relation(fields: [rootId], references: [id], onDelete: Cascade)
+  fullPath             String       @unique
+  relativePath         String
+  filename             String
+  extension            String
+  fileSize             BigInt
+  mtimeMs              BigInt
+  
+  title                String
+  trackNumber          Int?
+  discNumber           Int?
+  duration             Float        @default(0) // Duration in seconds
+  year                 Int?
+  genre                String?
+  composer             String?
+  comment              String?
+  
+  codec                String?
+  bitrate              Int?
+  sampleRate           Int?
+  bitDepth             Int?
+  channels             Int?
+  isLossless           Boolean      @default(false)
+  isUnavailable        Boolean      @default(false)
+
+  artistId             String?
+  artist               Artist?      @relation(fields: [artistId], references: [id], onDelete: SetNull)
+  artistName           String       @default("Unknown Artist")
+  
+  albumId              String?
+  album                Album?       @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  albumTitle           String       @default("Unknown Album")
+  albumArtist          String?
+
+  // Folder layout: <root>/<folderArtist>/<folderAlbum>/[CD1/]file
+  folderArtist         String?
+  folderAlbum          String?
+  folderPath           String?      // root-relative directory of the file, '/' separated
+
+  artworkId            String?
+  artwork              Artwork?     @relation(fields: [artworkId], references: [id], onDelete: SetNull)
+
+  importedPlayCount    Int          @default(0)
+  importedSkipCount    Int          @default(0)
+  importedLastPlayed   DateTime?
+  importedDateAdded    DateTime?
+
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  playlistTracks       PlaylistTrack[]
+  userStats            UserTrackStats[]
+  playbackSessions     PlaybackSession[]
+  playbackEvents       PlaybackEvent[]
+  externalStats        ExternalTrackStats[]
+  scrobbleJobs         ScrobbleJob[]
+
+  @@index([artistName])
+  @@index([albumTitle])
+  @@index([genre])
+  @@index([year])
+  @@index([rootId])
+  @@index([rootId, folderArtist, folderAlbum])
+}
+
+model Artwork {
+  id        String   @id @default(uuid())
+  hash      String   @unique
+  source    String   // "embedded" | "folder" | "musicbee" | "custom"
+  mimeType  String   @default("image/jpeg")
+  filePath  String?  // path to cached image on disk
+  createdAt DateTime @default(now())
+
+  tracks    Track[]
+  albums    Album[]
+}
+
+model Playlist {
+  id          String          @id @default(uuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isSmart     Boolean         @default(false)
+  smartRules  String?         // JSON string defining condition tree
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tracks      PlaylistTrack[]
+}
+
+model PlaylistTrack {
+  id         String   @id @default(uuid())
+  playlistId String
+  playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  trackId    String
+  track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  sortOrder  Int      @default(0)
+  addedAt    DateTime @default(now())
+
+  @@unique([playlistId, trackId, sortOrder])
+  @@index([playlistId, sortOrder])
+}
+
+model UserTrackStats {
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId             String
+  track               Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  rating              Int?      // 0 - 100 (half-star to 5-star)
+  isFavorite          Boolean   @default(false)
+  playCount           Int       @default(0)
+  skipCount           Int       @default(0)
+  totalListeningTime  Float     @default(0) // cumulative listened seconds
+  lastPlayedAt        DateTime?
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([userId, trackId])
+  @@index([userId, isFavorite])
+  @@index([userId, playCount])
+  @@index([userId, lastPlayedAt])
+}
+
+model PlaybackSession {
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId         String
+  track           Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  listenedSeconds Float     @default(0)
+  isCompleted     Boolean   @default(false)
+  clientInfo      String?
+
+  events          PlaybackEvent[]
+
+  @@index([userId, startedAt])
+}
+
+model PlaybackEvent {
+  id               String          @id @default(uuid())
+  eventId          String          @unique // UUID generated by client for idempotency
+  userId           String
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackId          String
+  track            Track           @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  sessionId        String?
+  session          PlaybackSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  listenedSeconds  Float
+  thresholdReached Boolean         @default(false)
+  eventType        String          // "scrobble_eligible" | "play_counted" | "heartbeat"
+  timestamp        DateTime        @default(now())
+  createdAt        DateTime        @default(now())
+
+  @@index([userId, trackId, eventType])
+}
+
+model MusicBeeImport {
+  id                 String    @id @default(uuid())
+  libraryPath        String
+  sourceFile         String
+  tracksProcessed    Int       @default(0)
+  tracksMatched      Int       @default(0)
+  playlistsImported  Int       @default(0)
+  status             String    @default("pending") // "pending" | "success" | "failed"
+  log                String?
+  importedAt         DateTime  @default(now())
+}
+
+model ExternalTrackStats {
+  id                 String    @id @default(uuid())
+  trackId            String
+  track              Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  source             String    @default("musicbee")
+  originalFilePath   String
+  originalPlayCount  Int       @default(0)
+  originalSkipCount  Int       @default(0)
+  originalRating     Int?
+  originalLastPlayed DateTime?
+  metadataJson       String?
+  importedAt         DateTime  @default(now())
+
+  @@unique([trackId, source])
+}
+
+model LastFmAccount {
+  id                     String    @id @default(uuid())
+  userId                 String    @unique
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username               String
+  sessionKeyEncrypted    String
+  isScrobblingEnabled    Boolean   @default(true)
+  compatUsername         String?
+  compatPasswordEncrypted String?
+  connectedAt            DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+model ScrobbleJob {
+  id           String    @id @default(uuid())
+  userId       String
+  trackId      String
+  track        Track     @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  sessionId    String
+  artist       String
+  trackTitle   String
+  albumTitle   String?
+  timestamp    Int       // Unix timestamp of playback start
+  status       String    @default("pending") // "pending" | "submitted" | "failed" | "ignored"
+  retryCount   Int       @default(0)
+  nextRetryAt  DateTime?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status, nextRetryAt])
+  @@index([userId, trackId, timestamp])
+}
+
+model Setting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+}
