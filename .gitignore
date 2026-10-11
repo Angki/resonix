@@ -1,0 +1,33 @@
+node_modules/
+dist/
+build/
+server/dist/
+client/dist/
+server/public/
+.env
+*.env
+*.log
+logs/
+
+# SQLite databases & backups
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.bak*
+data/
+server/data/
+server/prisma/data/
+
+# Cache & build info
+cache/
+*.tsbuildinfo
+client/vite.config.d.ts
+client/vite.config.js
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
