@@ -77,6 +77,7 @@ export const PlayerBar: React.FC = () => {
   const lastTrackIdRef = useRef<string | null>(null);
   const lastTimeRef = useRef<number>(0);
   const listenedSinceLastReportRef = useRef<number>(0);
+  const isAdvancingRef = useRef<boolean>(false);
 
   // Web Audio API equalizer nodes
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -259,7 +260,7 @@ export const PlayerBar: React.FC = () => {
     });
   }, [currentTrack, isPlaying, resume, pause, previous, next, seek]);
 
-  // Handle actual listening time accumulation and backend reporting
+  // Handle actual listening time accumulation, watchdog near-end check, and backend reporting
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
@@ -308,6 +309,21 @@ export const PlayerBar: React.FC = () => {
         }
       }
     }
+
+    // Near-end watchdog: HTML5 audio streaming over HTTP 206 sometimes stalls or misses onended
+    // when duration metadata has a floating-point delta with decoded stream samples.
+    // Trigger auto-advance reliably when within 0.35s of effective duration.
+    const effectiveDur = audio.duration || currentTrack.duration;
+    if (
+      effectiveDur > 0 &&
+      cur >= effectiveDur - 0.35 &&
+      !audio.paused &&
+      !isSeeking &&
+      !isAdvancingRef.current
+    ) {
+      console.log(`[PlayerBar] Near-end watchdog auto-advancing at ${cur.toFixed(1)}s / ${effectiveDur.toFixed(1)}s`);
+      handleEnded();
+    }
   };
 
   const handleProgress = () => {
@@ -323,6 +339,13 @@ export const PlayerBar: React.FC = () => {
   };
 
   const handleEnded = () => {
+    // Mutex guard against double-advance from both onended and timeupdate watchdog
+    if (isAdvancingRef.current) return;
+    isAdvancingRef.current = true;
+    setTimeout(() => {
+      isAdvancingRef.current = false;
+    }, 1200);
+
     const audio = audioRef.current;
     const currentSessionId = usePlayerStore.getState().sessionId;
     const currentListened = usePlayerStore.getState().listenedSeconds;
@@ -347,14 +370,28 @@ export const PlayerBar: React.FC = () => {
     const { queue, queueIndex, isShuffle, repeatMode: rMode } = usePlayerStore.getState();
     if (queue.length === 0) return;
 
-    let nextIndex = queueIndex + 1;
+    // Verify current index directly against currentTrack.id to avoid stale index drift
+    let currentIndex = queueIndex;
+    if (currentTrack) {
+      const actualIdx = queue.findIndex(t => t.id === currentTrack.id);
+      if (actualIdx !== -1) currentIndex = actualIdx;
+    }
+
+    let nextIndex = currentIndex + 1;
     if (isShuffle) {
-      nextIndex = Math.floor(Math.random() * queue.length);
+      if (queue.length > 1) {
+        let rand = Math.floor(Math.random() * queue.length);
+        if (rand === currentIndex) rand = (rand + 1) % queue.length;
+        nextIndex = rand;
+      } else {
+        nextIndex = 0;
+      }
     } else if (nextIndex >= queue.length) {
       if (rMode === 'all') {
         nextIndex = 0;
       } else {
-        usePlayerStore.setState({ isPlaying: false });
+        console.log('[PlayerBar] End of queue reached, stopping playback');
+        usePlayerStore.setState({ isPlaying: false, currentTime: 0 });
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'none';
         }
@@ -364,6 +401,8 @@ export const PlayerBar: React.FC = () => {
 
     const nextTrack = queue[nextIndex];
     if (nextTrack && audio) {
+      console.log(`[PlayerBar] Auto-advancing to: "${nextTrack.title}" (${nextIndex + 1}/${queue.length})`);
+
       // 1. Synchronously set audio.src and start playback immediately in the native onended callback.
       // This preserves user gesture continuity so background tabs never get blocked by browser autoplay policy.
       lastTrackIdRef.current = nextTrack.id;
@@ -373,11 +412,12 @@ export const PlayerBar: React.FC = () => {
 
       const streamUrl = api.getStreamUrl(nextTrack.id, forceTranscode);
       audio.src = streamUrl;
+      audio.load();
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
           if (err.name !== 'AbortError') {
-            console.warn('Background auto-advance play error:', err);
+            console.warn('[PlayerBar] Background auto-advance play error:', err);
           }
         });
       }
@@ -449,6 +489,16 @@ export const PlayerBar: React.FC = () => {
           }
         }}
         onEnded={handleEnded}
+        onPause={() => {
+          const audio = audioRef.current;
+          if (audio && currentTrack && !isSeeking && !isAdvancingRef.current) {
+            const effDur = audio.duration || currentTrack.duration;
+            if (effDur > 0 && audio.currentTime >= effDur - 0.4) {
+              console.log(`[PlayerBar] EOF pause detected at ${audio.currentTime.toFixed(1)}s -> handleEnded()`);
+              handleEnded();
+            }
+          }
+        }}
         onError={(e) => {
           console.warn('Audio element error:', e);
           if (!forceTranscode && currentTrack) {
