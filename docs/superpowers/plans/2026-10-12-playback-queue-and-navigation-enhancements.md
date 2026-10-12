@@ -20,7 +20,7 @@
 - Modify: `server/src/routes/tracks.ts:153-186`
 - Test: `server/scripts/test_random_tracks.ts`
 
-- [ ] **Step 1: Implement `sortBy === 'random'` in `server/src/routes/tracks.ts`**
+- [x] **Step 1: Implement `sortBy === 'random'` in `server/src/routes/tracks.ts`**
 
 When `query.sortBy === 'random'` or `query.shuffle === 'true'`:
 In SQLite, querying with `ORDER BY RANDOM()` using Prisma raw query or random offset sampling for the requested `where` clause:
@@ -104,7 +104,7 @@ In SQLite, querying with `ORDER BY RANDOM()` using Prisma raw query or random of
     }
 ```
 
-- [ ] **Step 2: Test random tracks route with a test script**
+- [x] **Step 2: Test random tracks route with a test script**
 
 Create `server/scripts/test_random_tracks.ts`:
 ```typescript
@@ -125,13 +125,13 @@ main().finally(() => prisma.$disconnect());
 Run: `npx tsx scripts/test_random_tracks.ts`
 Expected: Successfully logs 5 random tracks. Remove temporary script.
 
-- [ ] **Step 3: Build server and verify endpoint**
+- [x] **Step 3: Build server and verify endpoint**
 
 Run: `npm run build:server`
 Run: `curl.exe -s "http://127.0.0.1:3000/api/tracks?sortBy=random&limit=3"`
 Expected: Returns 3 randomly sampled tracks with `200 OK`.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add server/src/routes/tracks.ts
@@ -146,7 +146,7 @@ git commit -m "feat(api): add fast SQLite ORDER BY RANDOM() support to tracks en
 - Modify: `client/src/components/PlayerBar.tsx:160-375`
 - Modify: `client/src/store/playerStore.ts:144-178`
 
-- [ ] **Step 1: Add synchronous track advance in `PlayerBar.tsx` `handleEnded`**
+- [x] **Step 1: Add synchronous track advance in `PlayerBar.tsx` `handleEnded`**
 
 In `PlayerBar.tsx`:
 ```typescript
@@ -244,7 +244,7 @@ In `PlayerBar.tsx`:
   };
 ```
 
-- [ ] **Step 2: Add `navigator.mediaSession.setPositionState` during playback**
+- [x] **Step 2: Add `navigator.mediaSession.setPositionState` during playback**
 
 In `handleTimeUpdate`:
 ```typescript
@@ -264,7 +264,7 @@ In `handleTimeUpdate`:
     }
 ```
 
-- [ ] **Step 3: Handle resilient `audio.onError` auto-skip**
+- [x] **Step 3: Handle resilient `audio.onError` auto-skip**
 
 In `<audio onError={...}>`:
 ```typescript
@@ -282,12 +282,12 @@ In `<audio onError={...}>`:
         }}
 ```
 
-- [ ] **Step 4: Build client and verify audio event handling**
+- [x] **Step 4: Build client and verify audio event handling**
 
 Run: `npm run build:client`
 Expected: Clean build without errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add client/src/components/PlayerBar.tsx
@@ -304,7 +304,7 @@ git commit -m "fix(player): implement synchronous continuous queue chaining and 
 - Modify: `client/src/components/TrackTable.tsx`
 - Modify: `client/src/components/AlbumGrid.tsx`
 
-- [ ] **Step 1: Create `client/src/components/AlphabetBar.tsx`**
+- [x] **Step 1: Create `client/src/components/AlphabetBar.tsx`**
 
 Features:
 - Character list: `['#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z']`.
@@ -361,7 +361,7 @@ export const AlphabetBar: React.FC<AlphabetBarProps> = ({
 };
 ```
 
-- [ ] **Step 2: Connect `AlphabetBar` in `TrackTable.tsx` and `AlbumGrid.tsx`**
+- [x] **Step 2: Connect `AlphabetBar` in `TrackTable.tsx` and `AlbumGrid.tsx`**
 
 In `TrackTable.tsx`:
 - Compute `activeLetters` by checking first letter of track artist or title:
@@ -395,7 +395,7 @@ In `TrackTable.tsx`:
 ```
 - Render `<AlphabetBar />` at top of `TrackTable` and `AlbumGrid` when `sortBy === 'artistName'` or `sortBy === 'title'` or `sortBy === 'albumTitle'`.
 
-- [ ] **Step 3: Connect `AlphabetBar` in `AlbumGrid.tsx`**
+- [x] **Step 3: Connect `AlphabetBar` in `AlbumGrid.tsx`**
 
 - In `AlbumGrid.tsx`, compute `activeLetters` from `albums`:
 ```typescript
@@ -420,12 +420,12 @@ In `TrackTable.tsx`:
 ```
 - On click: `rowVirtualizer.scrollToIndex(rowIndex, { align: 'start' })`.
 
-- [ ] **Step 4: Build client and verify rendering**
+- [x] **Step 4: Build client and verify rendering**
 
 Run: `npm run build:client`
 Expected: Build succeeds with 0 errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add client/src/components/AlphabetBar.tsx client/src/components/TrackTable.tsx client/src/components/AlbumGrid.tsx
@@ -440,7 +440,7 @@ git commit -m "feat(ui): add horizontal A-Z alphabetical jump bar for TrackTable
 - Modify: `client/src/components/LeftSidebar.tsx:140-185`
 - Modify: `client/src/components/TopToolbar.tsx:190-240`
 
-- [ ] **Step 1: Add Shuffle button to collection items in `LeftSidebar.tsx`**
+- [x] **Step 1: Add Shuffle button to collection items in `LeftSidebar.tsx`**
 
 In `LeftSidebar.tsx`:
 ```tsx
@@ -481,7 +481,7 @@ And on "All Collections":
   </button>
 ```
 
-- [ ] **Step 2: Add "Shuffle Library" button to `TopToolbar.tsx`**
+- [x] **Step 2: Add "Shuffle Library" button to `TopToolbar.tsx`**
 
 In `TopToolbar.tsx`:
 ```tsx
@@ -506,13 +506,13 @@ In `TopToolbar.tsx`:
   </button>
 ```
 
-- [ ] **Step 3: Build client & server, copy client build to server**
+- [x] **Step 3: Build client & server, copy client build to server**
 
 Run: `npm run build`
 Expected:
 `client` build succeeds, assets copied to `server/public`, `server` build succeeds.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add client/src/components/LeftSidebar.tsx client/src/components/TopToolbar.tsx
@@ -526,8 +526,8 @@ git commit -m "feat(ui): add collection-level Shuffle All buttons to LeftSidebar
 **Files:**
 - Test scripts and browser verification
 
-- [ ] **Step 1: Restart server with updated build**
-- [ ] **Step 2: Test API random shuffle endpoint with `curl.exe`**
-- [ ] **Step 3: Test continuous audio playback & MediaSession metadata via Playwright / browser test**
-- [ ] **Step 4: Verify AlphabetBar interactions and smooth scroll**
-- [ ] **Step 5: Final git status check and clean-up**
+- [x] **Step 1: Restart server with updated build**
+- [x] **Step 2: Test API random shuffle endpoint with `curl.exe`**
+- [x] **Step 3: Test continuous audio playback & MediaSession metadata via Playwright / browser test**
+- [x] **Step 4: Verify AlphabetBar interactions and smooth scroll**
+- [x] **Step 5: Final git status check and clean-up**
