@@ -47,12 +47,15 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
 
   if (!sessionToken) {
     // Single-user personal vault: default to angki_ang or admin user
-    const defaultUser = await prisma.user.findFirst({
-      where: {
-        OR: [{ username: 'angki_ang' }, { role: 'admin' }],
-      },
-      select: { id: true, username: true, role: true },
-    });
+    const defaultUser =
+      (await prisma.user.findUnique({
+        where: { username: 'angki_ang' },
+        select: { id: true, username: true, role: true },
+      })) ||
+      (await prisma.user.findFirst({
+        where: { role: 'admin' },
+        select: { id: true, username: true, role: true },
+      }));
 
     if (defaultUser) {
       req.user = defaultUser;
@@ -65,12 +68,15 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
 
   const verified = verifySession(sessionToken);
   if (!verified) {
-    const defaultUser = await prisma.user.findFirst({
-      where: {
-        OR: [{ username: 'angki_ang' }, { role: 'admin' }],
-      },
-      select: { id: true, username: true, role: true },
-    });
+    const defaultUser =
+      (await prisma.user.findUnique({
+        where: { username: 'angki_ang' },
+        select: { id: true, username: true, role: true },
+      })) ||
+      (await prisma.user.findFirst({
+        where: { role: 'admin' },
+        select: { id: true, username: true, role: true },
+      }));
     if (defaultUser) {
       req.user = defaultUser;
       return;

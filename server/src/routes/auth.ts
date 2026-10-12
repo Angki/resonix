@@ -18,12 +18,15 @@ export async function authRoutes(app: FastifyInstance) {
       };
     }
 
-    const defaultUser = await prisma.user.findFirst({
-      where: {
-        OR: [{ username: 'angki_ang' }, { role: 'admin' }],
-      },
-      select: { id: true, username: true, role: true },
-    });
+    const defaultUser =
+      (await prisma.user.findUnique({
+        where: { username: 'angki_ang' },
+        select: { id: true, username: true, role: true },
+      })) ||
+      (await prisma.user.findFirst({
+        where: { role: 'admin' },
+        select: { id: true, username: true, role: true },
+      }));
 
     if (defaultUser) {
       return {
