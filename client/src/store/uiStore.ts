@@ -1,10 +1,10 @@
 import { create } from 'zustand';
-import { User, SearchField } from '../types';
+import { User, SearchField, Track } from '../types';
 
 export type ViewMode = 'table' | 'albumGrid';
 export type LibrarySection = 'all' | 'collection' | 'albums' | 'artists' | 'genres' | 'playlists' | 'favorites' | 'history';
 export type RightPanelTab = 'nowPlaying' | 'queue' | 'details';
-export type ThemeName = 'blacklibrary' | 'spotify' | 'musicbee' | 'amber' | 'light';
+export type ThemeName = 'blacklibrary' | 'spotify' | 'musicbee' | 'amber' | 'light' | 'glass' | 'metro-dark' | 'metro-light';
 
 interface UiState {
   theme: ThemeName;
@@ -35,6 +35,11 @@ interface UiState {
   isSettingsOpen: boolean;
   isAuthModalOpen: boolean;
   isEqualizerOpen: boolean;
+  isKeyboardShortcutsOpen: boolean;
+  isMobileNowPlayingOpen: boolean;
+  isTrackPropertiesOpen: boolean;
+  propertiesTrack: Track | null;
+  highlightedAlbumId: string | null;
   gridCoverSize: number;
   currentUser: User | null;
 
@@ -64,6 +69,11 @@ interface UiState {
   setSettingsOpen: (open: boolean) => void;
   setAuthModalOpen: (open: boolean) => void;
   setEqualizerOpen: (open: boolean) => void;
+  setKeyboardShortcutsOpen: (open: boolean) => void;
+  setMobileNowPlayingOpen: (open: boolean) => void;
+  openTrackProperties: (track: Track) => void;
+  closeTrackProperties: () => void;
+  setHighlightedAlbumId: (id: string | null) => void;
   setCurrentUser: (user: User | null) => void;
 }
 
@@ -164,6 +174,11 @@ export const useUiStore = create<UiState>((set, get) => ({
   isSettingsOpen: false,
   isAuthModalOpen: false,
   isEqualizerOpen: false,
+  isKeyboardShortcutsOpen: false,
+  isMobileNowPlayingOpen: false,
+  isTrackPropertiesOpen: false,
+  propertiesTrack: null,
+  highlightedAlbumId: null,
   currentUser: null,
 
   setTheme: (theme) => {
@@ -315,5 +330,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   setSettingsOpen: (open) => set({ isSettingsOpen: open }),
   setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
   setEqualizerOpen: (open) => set({ isEqualizerOpen: open }),
+  setKeyboardShortcutsOpen: (open) => set({ isKeyboardShortcutsOpen: open }),
+  setMobileNowPlayingOpen: (open) => set({ isMobileNowPlayingOpen: open }),
+  openTrackProperties: (track) => set({ isTrackPropertiesOpen: true, propertiesTrack: track }),
+  closeTrackProperties: () => set({ isTrackPropertiesOpen: false, propertiesTrack: null }),
+  setHighlightedAlbumId: (id) => set({ highlightedAlbumId: id }),
   setCurrentUser: (user) => set({ currentUser: user }),
 }));

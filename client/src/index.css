@@ -72,6 +72,60 @@
   color: #0f172a;
 }
 
+[data-theme="glass"] {
+  color-scheme: dark;
+  --theme-bg-950: #08090d;
+  --theme-bg-900: #0f1118;
+  --theme-bg-850: #151824;
+  --theme-bg-800: #1d2133;
+  --theme-bg-750: #262b42;
+  --theme-bg-700: #333a57;
+  --theme-accent-dark: #831843;
+  --theme-accent: #e11d48;
+  --theme-accent-light: #fb7185;
+}
+
+[data-theme="glass"] body {
+  background: radial-gradient(circle at 50% 0%, #171926 0%, #08090d 100%);
+  color: #f1f5f9;
+}
+
+[data-theme="metro-dark"] {
+  color-scheme: dark;
+  --theme-bg-950: #000000;
+  --theme-bg-900: #0a0a0a;
+  --theme-bg-850: #121212;
+  --theme-bg-800: #1a1a1a;
+  --theme-bg-750: #242424;
+  --theme-bg-700: #2e2e2e;
+  --theme-accent-dark: #005a9e;
+  --theme-accent: #0078d7;
+  --theme-accent-light: #2b88d8;
+}
+
+[data-theme="metro-dark"] body {
+  background-color: #000000;
+  color: #ffffff;
+}
+
+[data-theme="metro-light"] {
+  color-scheme: light;
+  --theme-bg-950: #e8e8e8;
+  --theme-bg-900: #ffffff;
+  --theme-bg-850: #f4f4f4;
+  --theme-bg-800: #e0e0e0;
+  --theme-bg-750: #d0d0d0;
+  --theme-bg-700: #b0b0b0;
+  --theme-accent-dark: #004578;
+  --theme-accent: #0078d7;
+  --theme-accent-light: #106ebe;
+}
+
+[data-theme="metro-light"] body {
+  background-color: #f4f4f4;
+  color: #111111;
+}
+
 body {
   margin: 0;
   padding: 0;

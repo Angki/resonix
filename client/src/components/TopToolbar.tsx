@@ -13,6 +13,7 @@ import {
   Palette,
   ChevronDown,
   Shuffle,
+  Keyboard,
 } from 'lucide-react';
 import { useUiStore, ThemeName } from '../store/uiStore';
 import { usePlayerStore } from '../store/playerStore';
@@ -46,6 +47,7 @@ export const TopToolbar: React.FC = () => {
     rightPanelOpen,
     toggleRightPanel,
     setSettingsOpen,
+    setKeyboardShortcutsOpen,
     currentUser,
     setAuthModalOpen,
   } = useUiStore();
@@ -302,8 +304,26 @@ export const TopToolbar: React.FC = () => {
             <option value="light" className="bg-charcoal-900 text-zinc-200">
               Light Metal
             </option>
+            <option value="glass" className="bg-charcoal-900 text-zinc-200">
+              Glassmorphism
+            </option>
+            <option value="metro-dark" className="bg-charcoal-900 text-zinc-200">
+              Metro Dark (Zune)
+            </option>
+            <option value="metro-light" className="bg-charcoal-900 text-zinc-200">
+              Metro Light
+            </option>
           </select>
         </div>
+
+        {/* Keyboard Shortcuts button */}
+        <button
+          onClick={() => setKeyboardShortcutsOpen(true)}
+          title="Keyboard Shortcuts (?)"
+          className="p-1.5 rounded hover:bg-charcoal-750 text-zinc-400 hover:text-zinc-200 transition"
+        >
+          <Keyboard size={14} />
+        </button>
 
         {/* Settings button */}
         <button
