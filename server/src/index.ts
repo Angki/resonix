@@ -27,6 +27,15 @@ import { settingsRoutes } from './routes/settings.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Prevent unhandled background errors from crashing the daemon
+process.on('uncaughtException', (err) => {
+  console.error('[Black-Library] Uncaught exception captured (preventing crash):', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Black-Library] Unhandled promise rejection captured (preventing crash):', reason);
+});
+
 const app = Fastify({
   trustProxy: true,
   logger: {

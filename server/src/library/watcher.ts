@@ -246,31 +246,37 @@ export async function startLibraryWatcher() {
 
   console.log(`[Auto-Watcher] Starting live folder watcher for ${validPaths.length} collection roots...`);
 
-  watcher = chokidar.watch(validPaths, {
-    ignored: /(^|[\/\\])\..|node_modules|\.tmp$|\.part$/i,
-    persistent: true,
-    ignoreInitial: true, // initial scan is done by scanner
-    depth: 6,
-    awaitWriteFinish: {
-      stabilityThreshold: 2000,
-      pollInterval: 250,
-    },
-  });
+  try {
+    watcher = chokidar.watch(validPaths, {
+      ignored: /(^|[\/\\])\..|node_modules|\.tmp$|\.part$/i,
+      persistent: true,
+      ignoreInitial: true, // initial scan is done by scanner
+      ignorePermissionErrors: true,
+      depth: 6,
+      awaitWriteFinish: {
+        stabilityThreshold: 2000,
+        pollInterval: 250,
+      },
+    });
 
-  const queueChange = (filePath: string) => {
-    if (isSupportedAudio(filePath)) {
-      pendingFiles.add(filePath);
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        processPendingFiles().catch(err => console.error('[Auto-Watcher] Error:', err));
-      }, 4000);
-    }
-  };
+    watcher.on('error', (err: any) => console.warn('[Auto-Watcher] Watcher error (handled):', err?.message || err));
 
-  watcher.on('add', queueChange);
-  watcher.on('change', queueChange);
-  watcher.on('unlink', queueChange);
-  watcher.on('error', (err: any) => console.warn('[Auto-Watcher] Watcher error:', err));
+    const queueChange = (filePath: string) => {
+      if (isSupportedAudio(filePath)) {
+        pendingFiles.add(filePath);
+        if (debounceTimer) clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          processPendingFiles().catch(err => console.error('[Auto-Watcher] Error:', err));
+        }, 4000);
+      }
+    };
+
+    watcher.on('add', queueChange);
+    watcher.on('change', queueChange);
+    watcher.on('unlink', queueChange);
+  } catch (err: any) {
+    console.warn('[Auto-Watcher] Failed to initialize watcher:', err?.message || err);
+  }
 }
 
 export async function stopLibraryWatcher() {
