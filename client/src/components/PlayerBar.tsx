@@ -292,6 +292,22 @@ export const PlayerBar: React.FC = () => {
       }
     }
     lastTimeRef.current = cur;
+
+    // Keep MediaSession position state strictly synced to prevent OS background notification drops
+    if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
+      const effDuration = audio.duration || currentTrack.duration;
+      if (effDuration && isFinite(effDuration) && effDuration > 0) {
+        try {
+          navigator.mediaSession.setPositionState({
+            duration: effDuration,
+            playbackRate: audio.playbackRate || 1,
+            position: Math.min(Math.max(0, cur), effDuration),
+          });
+        } catch {
+          // ignore transient position timing discrepancies
+        }
+      }
+    }
   };
 
   const handleProgress = () => {
@@ -307,6 +323,7 @@ export const PlayerBar: React.FC = () => {
   };
 
   const handleEnded = () => {
+    const audio = audioRef.current;
     const currentSessionId = usePlayerStore.getState().sessionId;
     const currentListened = usePlayerStore.getState().listenedSeconds;
 
@@ -320,12 +337,81 @@ export const PlayerBar: React.FC = () => {
     }
 
     if (repeatMode === 'one') {
-      if (audioRef.current) {
-        audioRef.current.currentTime = 0;
-        audioRef.current.play();
+      if (audio) {
+        audio.currentTime = 0;
+        audio.play().catch(e => console.warn('Repeat play failed:', e));
       }
-    } else {
-      next();
+      return;
+    }
+
+    const { queue, queueIndex, isShuffle, repeatMode: rMode } = usePlayerStore.getState();
+    if (queue.length === 0) return;
+
+    let nextIndex = queueIndex + 1;
+    if (isShuffle) {
+      nextIndex = Math.floor(Math.random() * queue.length);
+    } else if (nextIndex >= queue.length) {
+      if (rMode === 'all') {
+        nextIndex = 0;
+      } else {
+        usePlayerStore.setState({ isPlaying: false });
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.playbackState = 'none';
+        }
+        return;
+      }
+    }
+
+    const nextTrack = queue[nextIndex];
+    if (nextTrack && audio) {
+      // 1. Synchronously set audio.src and start playback immediately in the native onended callback.
+      // This preserves user gesture continuity so background tabs never get blocked by browser autoplay policy.
+      lastTrackIdRef.current = nextTrack.id;
+      lastTimeRef.current = 0;
+      listenedSinceLastReportRef.current = 0;
+      resetListenedSeconds();
+
+      const streamUrl = api.getStreamUrl(nextTrack.id, forceTranscode);
+      audio.src = streamUrl;
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          if (err.name !== 'AbortError') {
+            console.warn('Background auto-advance play error:', err);
+          }
+        });
+      }
+
+      // 2. Synchronously refresh MediaSession metadata to retain browser notification controls
+      if ('mediaSession' in navigator) {
+        const artworkUrl = api.getTrackArtworkUrl(nextTrack.id, 512);
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: nextTrack.title,
+          artist: nextTrack.artistName,
+          album: nextTrack.albumTitle || 'Unknown Album',
+          artwork: [
+            { src: artworkUrl, sizes: '512x512', type: 'image/webp' },
+            { src: artworkUrl, sizes: '256x256', type: 'image/webp' },
+          ],
+        });
+        navigator.mediaSession.playbackState = 'playing';
+      }
+
+      // 3. Update Zustand store
+      usePlayerStore.setState({
+        queueIndex: nextIndex,
+        currentTrack: nextTrack,
+        isPlaying: true,
+        currentTime: 0,
+        duration: nextTrack.duration,
+        sessionId: null,
+        listenedSeconds: 0,
+      });
+
+      // 4. Start backend playback tracking session
+      api.startPlayback(nextTrack.id).then((res) => {
+        setSessionId(res.sessionId);
+      }).catch(err => console.error('Failed to start playback session:', err));
     }
   };
 
@@ -368,6 +454,11 @@ export const PlayerBar: React.FC = () => {
           if (!forceTranscode && currentTrack) {
             console.log('Direct playback failed, switching to transcode fallback...');
             setForceTranscode(true);
+          } else {
+            console.warn('Track unplayable, auto-advancing to next track in queue...');
+            setTimeout(() => {
+              handleEnded();
+            }, 1000);
           }
         }}
       />
