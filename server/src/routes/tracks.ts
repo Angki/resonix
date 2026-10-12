@@ -95,12 +95,101 @@ export async function tracksRoutes(app: FastifyInstance) {
       sortOrder?: 'asc' | 'desc';
       page?: string;
       limit?: string;
+      shuffle?: string;
     };
 
     const userId = req.user?.id;
     const page = Math.max(1, parseInt(query.page || '1', 10));
     const limit = Math.min(10000, Math.max(1, parseInt(query.limit || '1000', 10)));
     const skip = (page - 1) * limit;
+
+    const sortField = query.sortBy;
+    const sortDir = query.sortOrder === 'desc' ? 'desc' : 'asc';
+
+    if (sortField === 'random' || query.shuffle === 'true') {
+      // Use raw query for true high-speed SQLite RANDOM() selection
+      const whereConditions: string[] = ['t.isUnavailable = 0'];
+      const params: any[] = [];
+
+      if (query.rootId) {
+        whereConditions.push('t.rootId = ?');
+        params.push(query.rootId);
+      }
+      if (query.artistId) {
+        whereConditions.push('t.artistId = ?');
+        params.push(query.artistId);
+      }
+      if (query.albumId) {
+        whereConditions.push('t.albumId = ?');
+        params.push(query.albumId);
+      }
+      if (query.genre) {
+        whereConditions.push('t.genre LIKE ?');
+        params.push(`%${query.genre}%`);
+      }
+      if (query.year) {
+        whereConditions.push('t.year = ?');
+        params.push(parseInt(query.year, 10));
+      }
+
+      const whereSql = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+      const limitVal = Math.min(limit, 500);
+
+      const randomRows = await prisma.$queryRawUnsafe<any[]>(
+        `SELECT t.*, r.name as collectionName 
+         FROM Track t 
+         LEFT JOIN LibraryRoot r ON t.rootId = r.id 
+         ${whereSql} 
+         ORDER BY RANDOM() 
+         LIMIT ${limitVal}`,
+        ...params
+      );
+
+      const formatted = randomRows.map(t => ({
+        id: t.id,
+        rootId: t.rootId,
+        collectionName: t.collectionName || 'Library',
+        relativePath: t.relativePath,
+        filename: t.filename,
+        extension: t.extension,
+        fileSize: Number(t.fileSize),
+        title: t.title,
+        trackNumber: t.trackNumber,
+        discNumber: t.discNumber,
+        duration: t.duration,
+        year: t.year,
+        genre: t.genre,
+        codec: t.codec,
+        bitrate: t.bitrate,
+        sampleRate: t.sampleRate,
+        bitDepth: t.bitDepth,
+        channels: t.channels,
+        isLossless: Boolean(t.isLossless),
+        artistId: t.artistId,
+        artistName: t.artistName,
+        albumId: t.albumId,
+        albumTitle: t.albumTitle,
+        albumArtist: t.albumArtist,
+        folderArtist: t.folderArtist,
+        folderAlbum: t.folderAlbum,
+        folderPath: t.folderPath,
+        artworkId: t.artworkId,
+        isFavorite: false,
+        rating: null,
+        localPlayCount: 0,
+        importedPlayCount: t.importedPlayCount || 0,
+        combinedPlayCount: t.importedPlayCount || 0,
+        lastPlayed: null,
+        dateAdded: t.createdAt ? new Date(t.createdAt).toISOString() : new Date().toISOString(),
+      }));
+
+      return {
+        total: formatted.length,
+        page: 1,
+        limit: limitVal,
+        tracks: formatted,
+      };
+    }
 
     const where: any = {
       isUnavailable: false,
@@ -149,9 +238,6 @@ export async function tracksRoutes(app: FastifyInstance) {
         },
       };
     }
-
-    const sortField = query.sortBy;
-    const sortDir = query.sortOrder === 'desc' ? 'desc' : 'asc';
 
     let orderBy: any = {};
     if (query.albumId && !sortField) {
