@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Play, ListPlus, Radio, Star, FolderPlus, Info } from 'lucide-react';
+import { Play, ListPlus, Radio, Star, FolderPlus, Info, Compass, FileAudio } from 'lucide-react';
 import { Track } from '../types';
 
 interface ContextMenuProps {
@@ -13,6 +13,8 @@ interface ContextMenuProps {
   onToggleFavorite: (track: Track) => void;
   onAddToPlaylist?: (tracks: Track[]) => void;
   onShowDetails?: (track: Track) => void;
+  onLocateAlbum?: (track: Track) => void;
+  onOpenProperties?: (track: Track) => void;
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -26,6 +28,8 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onToggleFavorite,
   onAddToPlaylist,
   onShowDetails,
+  onLocateAlbum,
+  onOpenProperties,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -111,6 +115,19 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         </button>
       )}
 
+      {onLocateAlbum && (
+        <button
+          onClick={() => {
+            onLocateAlbum(primaryTrack);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
+        >
+          <Compass size={13} className="text-crimson-400" />
+          <span>Locate in Album Grid</span>
+        </button>
+      )}
+
       {onShowDetails && (
         <button
           onClick={() => {
@@ -120,7 +137,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
         >
           <Info size={13} className="text-zinc-400" />
-          <span>Track Properties</span>
+          <span>Track Details (Panel)</span>
+        </button>
+      )}
+
+      {onOpenProperties && (
+        <button
+          onClick={() => {
+            onOpenProperties(primaryTrack);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
+        >
+          <FileAudio size={13} className="text-amber-400" />
+          <span>Technical File Properties</span>
         </button>
       )}
     </div>

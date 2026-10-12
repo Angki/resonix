@@ -76,7 +76,7 @@ export const api = {
   startPlayback: (trackId: string) =>
     fetchJson<{ sessionId: string; startedAt: string }>('/api/playback/start', { method: 'POST', body: JSON.stringify({ trackId }) }),
   reportProgress: (body: { trackId: string; sessionId: string; listenedSeconds: number; eventId: string }) =>
-    fetchJson<{ status: string; thresholdReached: boolean; playCountIncremented?: boolean }>('/api/playback/progress', { method: 'POST', body: JSON.stringify(body) }),
+    fetchJson<{ status: string; thresholdReached: boolean; playCountIncremented?: boolean; isCompleted?: boolean }>('/api/playback/progress', { method: 'POST', body: JSON.stringify(body) }),
   toggleFavorite: (trackId: string) =>
     fetchJson<{ trackId: string; isFavorite: boolean }>('/api/playback/favorite', { method: 'POST', body: JSON.stringify({ trackId }) }),
   setRating: (trackId: string, rating: number | null) =>

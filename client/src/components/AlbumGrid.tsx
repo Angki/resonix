@@ -22,6 +22,7 @@ import { AlphabetBar } from './AlphabetBar';
 
 interface AlbumCardProps {
   album: Album;
+  isHighlighted?: boolean;
   onOpenModal: () => void;
   onSelectAlbum: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -29,6 +30,7 @@ interface AlbumCardProps {
 
 const AlbumCard: React.FC<AlbumCardProps> = ({
   album,
+  isHighlighted,
   onOpenModal,
   onContextMenu,
 }) => {
@@ -49,11 +51,16 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
 
   return (
     <div
+      id={`album-card-${album.id}`}
       onContextMenu={(e) => {
         e.preventDefault();
         onContextMenu(e);
       }}
-      className="group bg-charcoal-850 border border-charcoal-800 hover:border-charcoal-700 hover:bg-charcoal-800/80 rounded-md p-2.5 transition-colors duration-150 col-span-1 flex flex-col select-none"
+      className={`group bg-charcoal-850 border rounded-md p-2.5 transition-all duration-300 col-span-1 flex flex-col select-none ${
+        isHighlighted
+          ? 'ring-2 ring-crimson-500 border-crimson-500 bg-charcoal-800 shadow-xl shadow-crimson-900/50 scale-[1.02] animate-pulse z-10'
+          : 'border-charcoal-800 hover:border-charcoal-700 hover:bg-charcoal-800/80'
+      }`}
     >
       {/* Cover Art - Clicking opens tracklist modal popup */}
       <div
@@ -152,6 +159,8 @@ export const AlbumGrid: React.FC = () => {
     setAlbumSorting,
     gridCoverSize,
     setGridCoverSize,
+    highlightedAlbumId,
+    setHighlightedAlbumId,
   } = useUiStore();
 
   const [modalAlbum, setModalAlbum] = useState<Album | null>(null);
@@ -262,6 +271,22 @@ export const AlbumGrid: React.FC = () => {
     getItemKey: (index) => `${columnCount}-${index}`,
     overscan: 4,
   });
+
+  // Auto-scroll and focus to highlighted album when triggered from PlayerBar or elsewhere
+  useEffect(() => {
+    if (!highlightedAlbumId || !albums || albums.length === 0) return;
+    const idx = albums.findIndex((a) => a.id === highlightedAlbumId);
+    if (idx !== -1) {
+      const rowIndex = Math.floor(idx / columnCount);
+      rowVirtualizer.scrollToIndex(rowIndex, { align: 'center', behavior: 'smooth' });
+
+      // Keep glowing pulse visible, then reset highlight after 3.5s
+      const timer = setTimeout(() => {
+        setHighlightedAlbumId(null);
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightedAlbumId, albums, columnCount]);
 
   const handleJumpToLetter = (char: string) => {
     setSelectedLetter(char);
@@ -476,6 +501,7 @@ export const AlbumGrid: React.FC = () => {
                       <MemoizedAlbumCard
                         key={album.id}
                         album={album}
+                        isHighlighted={album.id === highlightedAlbumId}
                         onOpenModal={() => handleOpenAlbumModal(album)}
                         onSelectAlbum={() => handleSelectAlbum(album)}
                         onContextMenu={(e) => handleCardContextMenu(album, e)}

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'black-library-v2';
+const CACHE_NAME = 'black-library-v3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

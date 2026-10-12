@@ -13,11 +13,18 @@ import {
   Star,
   Settings2,
   Sliders,
+  Waves,
+  Radio,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { usePlayerStore } from '../store/playerStore';
 import { useUiStore } from '../store/uiStore';
-import { useEqualizerStore, EQ_FREQUENCIES } from '../store/equalizerStore';
+import { useEqualizerStore, EQ_FREQUENCIES_10 } from '../store/equalizerStore';
+import { useVisualizerStore } from '../store/visualizerStore';
+import { audioVisualizerService } from '../services/audioVisualizerService';
 import { api } from '../api/client';
+import { PlayerContextMenu } from './PlayerContextMenu';
+
 
 function formatTime(sec: number): string {
   if (!sec || isNaN(sec) || !isFinite(sec) || sec <= 0) return '0:00';
@@ -59,6 +66,7 @@ export const PlayerBar: React.FC = () => {
     incrementListenedSeconds,
     resetListenedSeconds,
     setForceTranscode,
+    listenedSeconds,
   } = usePlayerStore();
 
   const {
@@ -67,24 +75,66 @@ export const PlayerBar: React.FC = () => {
     setRightPanelTab,
     isEqualizerOpen,
     setEqualizerOpen,
+    setMobileNowPlayingOpen,
   } = useUiStore();
 
-  const { isEnabled: isEqEnabled, gains: eqGains } = useEqualizerStore();
+  const {
+    isEnabled: isEqEnabled,
+    gains: eqGains,
+    preAmp: eqPreAmp,
+    isNormalizerEnabled,
+  } = useEqualizerStore();
+  const { isOpen: isVisualizerOpen, toggleOpen: toggleVisualizer } = useVisualizerStore();
+
+  // Last.fm status query for live scrobble feedback
+  const { data: lastFmStatus } = useQuery({
+    queryKey: ['lastFmStatus'],
+    queryFn: () => api.getLastFmStatus(),
+    staleTime: 30000,
+  });
 
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
+  const [isScrobbled, setIsScrobbled] = useState(false);
+  const [playerContextMenuPos, setPlayerContextMenuPos] = useState<{ x: number; y: number } | null>(null);
 
   const lastTrackIdRef = useRef<string | null>(null);
   const lastTimeRef = useRef<number>(0);
   const listenedSinceLastReportRef = useRef<number>(0);
   const isAdvancingRef = useRef<boolean>(false);
+  const thresholdReportedRef = useRef<boolean>(false);
 
-  // Web Audio API equalizer nodes
+  // Reliable flush on tab close/unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const trackId = lastTrackIdRef.current;
+      const sessId = usePlayerStore.getState().sessionId;
+      const listened = usePlayerStore.getState().listenedSeconds;
+      if (trackId && sessId && listened > 0) {
+        navigator.sendBeacon?.(
+          '/api/playback/progress',
+          new Blob([JSON.stringify({
+            trackId,
+            sessionId: sessId,
+            listenedSeconds: listened,
+            eventId: crypto.randomUUID(),
+          })], { type: 'application/json' })
+        );
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
+  // Web Audio API equalizer, normalizer & visualizer nodes
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const preAmpGainRef = useRef<GainNode | null>(null);
   const filtersRef = useRef<BiquadFilterNode[]>([]);
+  const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
-  // Setup Web Audio API filter chain
+  // Setup Web Audio API filter chain, compressor & analyser node
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
@@ -100,11 +150,16 @@ export const PlayerBar: React.FC = () => {
             const srcNode = ctx.createMediaElementSource(audio);
             sourceNodeRef.current = srcNode;
 
-            const filters: BiquadFilterNode[] = EQ_FREQUENCIES.map((freq, i) => {
+            // Pre-amp gain node
+            const preAmpNode = ctx.createGain();
+            preAmpGainRef.current = preAmpNode;
+
+            // 10-band peaking filters
+            const filters: BiquadFilterNode[] = EQ_FREQUENCIES_10.map((freq, i) => {
               const filter = ctx.createBiquadFilter();
               if (i === 0) {
                 filter.type = 'lowshelf';
-              } else if (i === EQ_FREQUENCIES.length - 1) {
+              } else if (i === EQ_FREQUENCIES_10.length - 1) {
                 filter.type = 'highshelf';
               } else {
                 filter.type = 'peaking';
@@ -115,13 +170,42 @@ export const PlayerBar: React.FC = () => {
               return filter;
             });
 
-            // Chain: src -> filter[0] -> ... -> destination
+            // Audio Dynamics Compressor (Volume Normalizer & Peak Limiter)
+            const compressor = ctx.createDynamicsCompressor();
+            const initialNorm = useEqualizerStore.getState().isNormalizerEnabled;
+            if (initialNorm) {
+              compressor.threshold.value = -24;
+              compressor.knee.value = 30;
+              compressor.ratio.value = 12;
+              compressor.attack.value = 0.003;
+              compressor.release.value = 0.25;
+            } else {
+              compressor.threshold.value = 0;
+              compressor.knee.value = 0;
+              compressor.ratio.value = 1;
+            }
+            compressorRef.current = compressor;
+
+            // Analyser node for visualizer (512 fftSize, 0.8 smoothing)
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.8;
+            analyserRef.current = analyser;
+            audioVisualizerService.setAnalyser(analyser);
+
+            // Chain: src -> preAmp -> filter[0] -> ... -> filter[9] -> compressor -> analyser -> destination
             let prevNode: AudioNode = srcNode;
+            prevNode.connect(preAmpNode);
+            prevNode = preAmpNode;
+
             filters.forEach((f) => {
               prevNode.connect(f);
               prevNode = f;
             });
-            prevNode.connect(ctx.destination);
+
+            prevNode.connect(compressor);
+            compressor.connect(analyser);
+            analyser.connect(ctx.destination);
             filtersRef.current = filters;
           }
         } catch (e) {
@@ -146,15 +230,79 @@ export const PlayerBar: React.FC = () => {
     });
   }, [isEqEnabled, eqGains]);
 
+  // Update Pre-amp gain
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    const preAmpNode = preAmpGainRef.current;
+    if (!ctx || !preAmpNode) return;
+
+    const targetFactor = isEqEnabled ? Math.pow(10, eqPreAmp / 20) : 1;
+    try {
+      preAmpNode.gain.setTargetAtTime(targetFactor, ctx.currentTime, 0.05);
+    } catch {
+      preAmpNode.gain.value = targetFactor;
+    }
+  }, [isEqEnabled, eqPreAmp]);
+
+  // Update Dynamics Compressor (Volume Normalizer)
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    const comp = compressorRef.current;
+    if (!ctx || !comp) return;
+
+    const t = ctx.currentTime;
+    try {
+      if (isNormalizerEnabled) {
+        comp.threshold.setTargetAtTime(-24, t, 0.05);
+        comp.ratio.setTargetAtTime(12, t, 0.05);
+        comp.knee.setTargetAtTime(30, t, 0.05);
+        comp.attack.setTargetAtTime(0.003, t, 0.05);
+        comp.release.setTargetAtTime(0.25, t, 0.05);
+      } else {
+        comp.threshold.setTargetAtTime(0, t, 0.05);
+        comp.ratio.setTargetAtTime(1, t, 0.05);
+        comp.knee.setTargetAtTime(0, t, 0.05);
+      }
+    } catch {
+      if (isNormalizerEnabled) {
+        comp.threshold.value = -24;
+        comp.ratio.value = 12;
+        comp.knee.value = 30;
+        comp.attack.value = 0.003;
+        comp.release.value = 0.25;
+      } else {
+        comp.threshold.value = 0;
+        comp.ratio.value = 1;
+        comp.knee.value = 0;
+      }
+    }
+  }, [isNormalizerEnabled]);
+
+
   // Sync audio element with currentTrack
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
 
     if (lastTrackIdRef.current !== currentTrack.id) {
+      // Flush outgoing track listening progress before switching
+      const prevTrackId = lastTrackIdRef.current;
+      const prevSessionId = usePlayerStore.getState().sessionId;
+      const prevListened = usePlayerStore.getState().listenedSeconds;
+      if (prevTrackId && prevSessionId && prevListened > 0) {
+        api.reportProgress({
+          trackId: prevTrackId,
+          sessionId: prevSessionId,
+          listenedSeconds: prevListened,
+          eventId: crypto.randomUUID(),
+        }).catch(err => console.warn('Outgoing track progress flush failed:', err));
+      }
+
       lastTrackIdRef.current = currentTrack.id;
       lastTimeRef.current = 0;
       listenedSinceLastReportRef.current = 0;
+      thresholdReportedRef.current = false;
+      setIsScrobbled(false);
       resetListenedSeconds();
 
       // Resume audio context if suspended
@@ -275,17 +423,43 @@ export const PlayerBar: React.FC = () => {
         incrementListenedSeconds(delta);
         listenedSinceLastReportRef.current += delta;
 
-        // Periodic report every 15 seconds
-        if (listenedSinceLastReportRef.current >= 15) {
-          const currentSessionId = usePlayerStore.getState().sessionId;
-          const currentListened = usePlayerStore.getState().listenedSeconds;
+        const currentListened = usePlayerStore.getState().listenedSeconds;
+        const currentSessionId = usePlayerStore.getState().sessionId;
+        const effDuration = audio.duration || currentTrack.duration || 0;
+        const scrobbleThreshold = Math.min(effDuration * 0.5, 240);
+        const isEligible = effDuration >= 30;
 
+        // Instant threshold reporting: the exact second threshold (50% or 240s) is crossed!
+        if (isEligible && currentListened >= scrobbleThreshold && !thresholdReportedRef.current && currentSessionId) {
+          thresholdReportedRef.current = true;
+          setIsScrobbled(true);
+          api.reportProgress({
+            trackId: currentTrack.id,
+            sessionId: currentSessionId,
+            listenedSeconds: currentListened,
+            eventId: crypto.randomUUID(),
+          }).then(res => {
+            if (res.thresholdReached || res.isCompleted) {
+              setIsScrobbled(true);
+            }
+          }).catch(e => {
+            console.warn('Instant scrobble progress report failed:', e);
+            thresholdReportedRef.current = false;
+          });
+          listenedSinceLastReportRef.current = 0;
+        } else if (listenedSinceLastReportRef.current >= 15) {
+          // Periodic heartbeat every 15 seconds
           if (currentSessionId) {
             api.reportProgress({
               trackId: currentTrack.id,
               sessionId: currentSessionId,
               listenedSeconds: currentListened,
               eventId: crypto.randomUUID(),
+            }).then(res => {
+              if (res.thresholdReached || res.isCompleted) {
+                setIsScrobbled(true);
+                thresholdReportedRef.current = true;
+              }
             }).catch(e => console.warn('Progress report failed:', e));
           }
           listenedSinceLastReportRef.current = 0;
@@ -312,16 +486,18 @@ export const PlayerBar: React.FC = () => {
 
     // Near-end watchdog: HTML5 audio streaming over HTTP 206 sometimes stalls or misses onended
     // when duration metadata has a floating-point delta with decoded stream samples.
-    // Trigger auto-advance reliably when within 0.35s of effective duration.
-    const effectiveDur = audio.duration || currentTrack.duration;
+    // Trigger auto-advance reliably when within 0.75s of actual audio duration while still actively playing.
+    const actualDur = audio.duration;
     if (
-      effectiveDur > 0 &&
-      cur >= effectiveDur - 0.35 &&
+      actualDur &&
+      isFinite(actualDur) &&
+      actualDur > 2 &&
+      cur >= actualDur - 0.75 &&
       !audio.paused &&
       !isSeeking &&
       !isAdvancingRef.current
     ) {
-      console.log(`[PlayerBar] Near-end watchdog auto-advancing at ${cur.toFixed(1)}s / ${effectiveDur.toFixed(1)}s`);
+      console.log(`[PlayerBar] Near-end watchdog auto-advancing at ${cur.toFixed(1)}s / ${actualDur.toFixed(1)}s`);
       handleEnded();
     }
   };
@@ -392,6 +568,8 @@ export const PlayerBar: React.FC = () => {
       } else {
         console.log('[PlayerBar] End of queue reached, stopping playback');
         usePlayerStore.setState({ isPlaying: false, currentTime: 0 });
+        thresholdReportedRef.current = false;
+        setIsScrobbled(false);
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'none';
         }
@@ -408,11 +586,12 @@ export const PlayerBar: React.FC = () => {
       lastTrackIdRef.current = nextTrack.id;
       lastTimeRef.current = 0;
       listenedSinceLastReportRef.current = 0;
+      thresholdReportedRef.current = false;
+      setIsScrobbled(false);
       resetListenedSeconds();
 
       const streamUrl = api.getStreamUrl(nextTrack.id, forceTranscode);
       audio.src = streamUrl;
-      audio.load();
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
@@ -477,6 +656,11 @@ export const PlayerBar: React.FC = () => {
   const currentPos = isSeeking ? seekValue : currentTime;
   const progressPercent = effectiveDuration > 0 ? (currentPos / effectiveDuration) * 100 : 0;
 
+  const scrobbleThreshold = Math.min(effectiveDuration * 0.5, 240);
+  const isScrobbleEligible = effectiveDuration >= 30;
+  const remainingScrobbleSec = Math.max(0, Math.ceil(scrobbleThreshold - listenedSeconds));
+  const scrobblePercent = scrobbleThreshold > 0 ? Math.min(100, Math.round((listenedSeconds / scrobbleThreshold) * 100)) : 0;
+
   return (
     <footer className="bg-charcoal-950 border-t border-charcoal-750 flex flex-col sm:flex-row sm:items-center sm:justify-between px-2 sm:px-3 select-none shrink-0 relative z-40 text-xs">
       <audio
@@ -488,12 +672,15 @@ export const PlayerBar: React.FC = () => {
             setDuration(audioRef.current.duration);
           }
         }}
-        onEnded={handleEnded}
+        onEnded={() => {
+          console.log('[PlayerBar] Native onEnded fired -> advancing');
+          handleEnded();
+        }}
         onPause={() => {
           const audio = audioRef.current;
           if (audio && currentTrack && !isSeeking && !isAdvancingRef.current) {
-            const effDur = audio.duration || currentTrack.duration;
-            if (effDur > 0 && audio.currentTime >= effDur - 0.4) {
+            const actualDur = audio.duration;
+            if (audio.ended || (actualDur && isFinite(actualDur) && actualDur > 2 && audio.currentTime >= actualDur - 0.75)) {
               console.log(`[PlayerBar] EOF pause detected at ${audio.currentTime.toFixed(1)}s -> handleEnded()`);
               handleEnded();
             }
@@ -505,7 +692,7 @@ export const PlayerBar: React.FC = () => {
             console.log('Direct playback failed, switching to transcode fallback...');
             setForceTranscode(true);
           } else {
-            console.warn('Track unplayable, auto-advancing to next track in queue...');
+            console.warn('Track unplayable or stream interrupted, auto-advancing to next track in queue...');
             setTimeout(() => {
               handleEnded();
             }, 1000);
@@ -517,7 +704,10 @@ export const PlayerBar: React.FC = () => {
       <div className="sm:hidden px-2 pt-1.5 pb-0.5 flex flex-col w-full bg-charcoal-950/95 border-b border-charcoal-850/60">
         <div className="flex items-center justify-between text-[10px] font-mono text-zinc-400 mb-0.5">
           <span className="w-8 text-left">{formatTime(currentPos)}</span>
-          <span className="text-zinc-400 font-sans truncate px-2 text-center text-[10.5px]">
+          <span
+            onClick={() => { if (currentTrack) setMobileNowPlayingOpen(true); }}
+            className="text-zinc-300 font-sans truncate px-2 text-center text-[10.5px] cursor-pointer active:text-crimson-400 hover:text-white transition"
+          >
             {currentTrack ? `${currentTrack.artistName} - ${currentTrack.title}` : 'No audio loaded'}
           </span>
           <span className="w-8 text-right text-zinc-500">{formatTime(effectiveDuration)}</span>
@@ -553,7 +743,21 @@ export const PlayerBar: React.FC = () => {
       {/* Main Bar Row (Mobile bottom row & Desktop full height row) */}
       <div className="h-14 sm:h-16 flex items-center justify-between w-full">
         {/* Left: Track Thumbnail and Info */}
-        <div className="flex items-center space-x-2 sm:space-x-3 flex-1 sm:flex-initial sm:w-1/4 sm:min-w-[170px] max-w-[48%] sm:max-w-none truncate">
+        <div
+          onContextMenu={(e) => {
+            if (currentTrack) {
+              e.preventDefault();
+              setPlayerContextMenuPos({ x: e.clientX, y: e.clientY });
+            }
+          }}
+          onClick={() => {
+            if (window.innerWidth < 640 && currentTrack) {
+              setMobileNowPlayingOpen(true);
+            }
+          }}
+          title={currentTrack ? `${currentTrack.artistName} - ${currentTrack.title} (Right-click for options)` : undefined}
+          className="flex items-center space-x-2 sm:space-x-3 flex-1 sm:flex-initial sm:w-1/4 sm:min-w-[170px] max-w-[48%] sm:max-w-none truncate sm:cursor-default cursor-pointer group/mobiletrack select-none"
+        >
           {currentTrack ? (
             <>
               <div className="w-9 h-9 sm:w-10 sm:h-10 rounded bg-charcoal-900 border border-charcoal-800 overflow-hidden shrink-0 relative">
@@ -573,6 +777,34 @@ export const PlayerBar: React.FC = () => {
                   </span>
                   {currentTrack.isFavorite && (
                     <Star size={10} className="text-yellow-400 fill-yellow-400 shrink-0" />
+                  )}
+                  {lastFmStatus?.isConnected && lastFmStatus?.isScrobblingEnabled && (
+                    <div className="shrink-0 flex items-center ml-1">
+                      {isScrobbled ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono font-semibold bg-red-950/60 text-red-400 border border-red-750/60 shadow-sm"
+                          title="✓ Track scrobbled to Last.fm"
+                        >
+                          <Radio size={8} className="text-red-500 animate-pulse" />
+                          <span>SCROBBLED</span>
+                        </span>
+                      ) : !isScrobbleEligible ? (
+                        <span
+                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[8.5px] font-mono text-zinc-500 bg-charcoal-900 border border-charcoal-800"
+                          title="Track <30s (ineligible for Last.fm scrobble)"
+                        >
+                          &lt;30s
+                        </span>
+                      ) : (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-zinc-400 bg-charcoal-900 border border-charcoal-800"
+                          title={`Scrobbles to Last.fm at 50% (${remainingScrobbleSec}s remaining • ${scrobblePercent}%)`}
+                        >
+                          <Radio size={8} className="text-zinc-500" />
+                          <span>{remainingScrobbleSec}s</span>
+                        </span>
+                      )}
+                    </div>
                   )}
                 </div>
                 <p className="text-zinc-400 text-[10.5px] sm:text-[11px] truncate mt-0.5" title={currentTrack.artistName}>
@@ -642,6 +874,16 @@ export const PlayerBar: React.FC = () => {
             }`}
           >
             <Sliders size={15} />
+          </button>
+
+          <button
+            onClick={toggleVisualizer}
+            title="Audio Visualizer (V)"
+            className={`p-1.5 rounded transition ${
+              isVisualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            }`}
+          >
+            <Waves size={15} />
           </button>
 
           <button
@@ -756,6 +998,29 @@ export const PlayerBar: React.FC = () => {
             </button>
           )}
 
+          {/* Last.fm Scrobble Pill */}
+          {currentTrack && lastFmStatus?.isConnected && lastFmStatus?.isScrobblingEnabled && (
+            <div className="hidden lg:flex items-center">
+              {isScrobbled ? (
+                <div
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-red-950/40 text-red-400 border border-red-800/60 shadow-sm"
+                  title={`Track scrobbled to Last.fm (${lastFmStatus.username})`}
+                >
+                  <Radio size={9} className="text-red-500 animate-pulse" />
+                  <span>LAST.FM SCROBBLED</span>
+                </div>
+              ) : isScrobbleEligible ? (
+                <div
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-charcoal-850 text-zinc-400 border border-charcoal-750"
+                  title={`Scrobbles to Last.fm at 50% (${remainingScrobbleSec}s remaining • ${scrobblePercent}%)`}
+                >
+                  <Radio size={9} className="text-zinc-500" />
+                  <span>SCROBBLE: {remainingScrobbleSec}s</span>
+                </div>
+              ) : null}
+            </div>
+          )}
+
           {/* Volume Slider */}
           <div className="hidden md:flex items-center space-x-1.5 group">
             <button
@@ -778,13 +1043,25 @@ export const PlayerBar: React.FC = () => {
           {/* Equalizer Toggle Button */}
           <button
             onClick={() => setEqualizerOpen(!isEqualizerOpen)}
-            title="10-Band Graphic Equalizer"
+            title="Parametric Graphic Equalizer"
             className={`p-2 rounded transition ${
               isEqualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
             }`}
           >
             <Sliders size={16} />
           </button>
+
+          {/* Audio Visualizer Toggle Button */}
+          <button
+            onClick={toggleVisualizer}
+            title="Audio Visualizer (V)"
+            className={`p-2 rounded transition ${
+              isVisualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            }`}
+          >
+            <Waves size={16} />
+          </button>
+
 
           {/* Queue Toggle Button */}
           <button
@@ -801,6 +1078,16 @@ export const PlayerBar: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Track Context Menu (Right click on playing track info) */}
+      {playerContextMenuPos && currentTrack && (
+        <PlayerContextMenu
+          x={playerContextMenuPos.x}
+          y={playerContextMenuPos.y}
+          track={currentTrack}
+          onClose={() => setPlayerContextMenuPos(null)}
+        />
+      )}
     </footer>
   );
 };

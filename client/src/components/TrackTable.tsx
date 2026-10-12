@@ -71,6 +71,9 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
     searchQuery,
     searchField,
     setSearchQuery,
+    setViewMode,
+    openTrackProperties,
+    setHighlightedAlbumId,
   } = useUiStore();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -428,6 +431,14 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
           onPlayNext={(ts) => playNext(ts)}
           onAddToQueue={(ts) => addToQueue(ts)}
           onToggleFavorite={handleToggleFavorite}
+          onLocateAlbum={(t) => {
+            if (t.albumId) {
+              setSearchQuery('');
+              setViewMode('albumGrid');
+              setHighlightedAlbumId(t.albumId);
+            }
+          }}
+          onOpenProperties={(t) => openTrackProperties(t)}
           onShowDetails={(t) => {
             if (!rightPanelOpen) toggleRightPanel();
             setRightPanelTab('details');

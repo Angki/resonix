@@ -13,6 +13,12 @@ import { PlayerBar } from './components/PlayerBar';
 import { SettingsModal } from './components/SettingsModal';
 import { AuthModal } from './components/AuthModal';
 import { EqualizerModal } from './components/EqualizerModal';
+import { VisualizerModal } from './components/VisualizerModal';
+import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
+import { MobileNowPlayingDrawer } from './components/MobileNowPlayingDrawer';
+import { TrackPropertiesModal } from './components/TrackPropertiesModal';
+import { useVisualizerStore } from './store/visualizerStore';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -24,6 +30,8 @@ const queryClient = new QueryClient({
 });
 
 const MainLayout: React.FC = () => {
+  useKeyboardShortcuts();
+
   const {
     viewMode,
     activeSection,
@@ -81,46 +89,6 @@ const MainLayout: React.FC = () => {
     }).catch(console.error);
   }, [setCurrentUser, setAuthModalOpen]);
 
-  // Global Keyboard Shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if typing in an input/textarea
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
-      if (tag === 'input' || tag === 'textarea') return;
-
-      if (e.code === 'Space') {
-        e.preventDefault();
-        togglePlay();
-      } else if (e.code === 'ArrowRight') {
-        if (e.altKey) {
-          next();
-        } else {
-          seek(currentTime + 5);
-        }
-      } else if (e.code === 'ArrowLeft') {
-        if (e.altKey) {
-          previous();
-        } else {
-          seek(Math.max(0, currentTime - 5));
-        }
-      } else if (e.code === 'ArrowUp') {
-        e.preventDefault();
-        setVolume(Math.min(1, volume + 0.05));
-      } else if (e.code === 'ArrowDown') {
-        e.preventDefault();
-        setVolume(Math.max(0, volume - 0.05));
-      } else if (e.key === 'm' || e.key === 'M') {
-        toggleMute();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === 'f' || e.key === 'F')) {
-        e.preventDefault();
-        const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement;
-        if (searchInput) searchInput.focus();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, previous, next, seek, setVolume, volume, toggleMute, currentTime]);
 
   // Query tracks with active filters
   const { data: trackData, isLoading: tracksLoading } = useQuery({
@@ -179,8 +147,13 @@ const MainLayout: React.FC = () => {
       <SettingsModal />
       <AuthModal />
       <EqualizerModal />
+      <VisualizerModal />
+      <KeyboardShortcutsModal />
+      <MobileNowPlayingDrawer />
+      <TrackPropertiesModal />
     </div>
   );
+
 };
 
 export function App() {
