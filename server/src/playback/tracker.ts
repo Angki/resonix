@@ -1,4 +1,6 @@
 import { prisma } from '../db.js';
+import { updateNowPlaying, processScrobbleQueue } from '../lastfm/api.js';
+import { decryptSecret } from '../crypto.js';
 
 export async function startPlaybackSession(userId: string, trackId: string, clientInfo?: string) {
   const session = await prisma.playbackSession.create({
@@ -12,6 +14,25 @@ export async function startPlaybackSession(userId: string, trackId: string, clie
       track: true,
     },
   });
+
+  // Notify Last.fm Now Playing asynchronously
+  prisma.lastFmAccount.findUnique({
+    where: { userId },
+  }).then(account => {
+    if (account && account.isScrobblingEnabled) {
+      const sessionKey = decryptSecret(account.sessionKeyEncrypted);
+      if (sessionKey) {
+        updateNowPlaying(
+          sessionKey,
+          session.track.artistName,
+          session.track.title,
+          session.track.albumTitle || undefined
+        ).catch(err => {
+          console.error('Failed to update Last.fm now playing:', err);
+        });
+      }
+    }
+  }).catch(() => {});
 
   return session;
 }
@@ -115,6 +136,11 @@ export async function reportPlaybackProgress(params: {
           timestamp,
           status: 'pending',
         },
+      });
+
+      // Immediate durable queue processing
+      processScrobbleQueue().catch(err => {
+        console.error('Error triggering immediate scrobble queue:', err);
       });
     }
   }

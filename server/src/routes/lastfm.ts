@@ -5,6 +5,7 @@ import { encryptSecret } from '../crypto.js';
 import {
   requestLastFmToken,
   exchangeTokenForSession,
+  getMobileSession,
   processScrobbleQueue,
   getLastFmCredentials,
 } from '../lastfm/api.js';
@@ -77,6 +78,51 @@ export async function lastFmRoutes(app: FastifyInstance) {
         username: session.username,
         sessionKeyEncrypted: encryptedKey,
         isScrobblingEnabled: true,
+      },
+    });
+
+    return {
+      success: true,
+      username: session.username,
+    };
+  });
+
+  app.post('/login', async (req, reply) => {
+    const userId = req.user?.id;
+    if (!userId) return reply.status(401).send({ error: 'Auth required' });
+
+    const { username, password } = req.body as { username?: string; password?: string };
+    if (!username || !password) {
+      return reply.status(400).send({ error: 'Username and password are required' });
+    }
+
+    const session = await getMobileSession(username, password);
+    if (!session) {
+      return reply.status(400).send({
+        error: 'Failed to authenticate with Last.fm. Check your username, password, or API credentials.',
+      });
+    }
+
+    const encryptedKey = encryptSecret(session.sessionKey);
+    const encryptedPass = encryptSecret(password);
+
+    await prisma.lastFmAccount.upsert({
+      where: { userId },
+      update: {
+        username: session.username,
+        sessionKeyEncrypted: encryptedKey,
+        isScrobblingEnabled: true,
+        compatUsername: username,
+        compatPasswordEncrypted: encryptedPass,
+        updatedAt: new Date(),
+      },
+      create: {
+        userId,
+        username: session.username,
+        sessionKeyEncrypted: encryptedKey,
+        isScrobblingEnabled: true,
+        compatUsername: username,
+        compatPasswordEncrypted: encryptedPass,
       },
     });
 

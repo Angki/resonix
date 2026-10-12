@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { prisma } from '../db.js';
 import { decryptSecret, encryptSecret } from '../crypto.js';
 
-const LASTFM_API_ROOT = 'http://ws.audioscrobbler.com/2.0/';
+const LASTFM_API_ROOT = 'https://ws.audioscrobbler.com/2.0/';
 
 export function generateApiSignature(params: Record<string, string>, secret: string): string {
   const sortedKeys = Object.keys(params)
@@ -76,6 +76,43 @@ export async function exchangeTokenForSession(token: string): Promise<{ username
     }
   } catch (e) {
     console.error('Last.fm token exchange failed:', e);
+  }
+  return null;
+}
+
+export async function getMobileSession(
+  username: string,
+  password: string
+): Promise<{ username: string; sessionKey: string } | null> {
+  const { apiKey, apiSecret } = await getLastFmCredentials();
+  if (!apiKey || !apiSecret) return null;
+
+  const params: Record<string, string> = {
+    method: 'auth.getMobileSession',
+    api_key: apiKey,
+    username,
+    password,
+  };
+  const apiSig = generateApiSignature(params, apiSecret);
+
+  try {
+    const res = await fetch(LASTFM_API_ROOT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ ...params, api_sig: apiSig, format: 'json' }).toString(),
+    });
+    const data = (await res.json()) as any;
+    if (data.session && data.session.key) {
+      return {
+        username: data.session.name,
+        sessionKey: data.session.key,
+      };
+    }
+    if (data.message) {
+      console.error('Last.fm getMobileSession error:', data.message);
+    }
+  } catch (e) {
+    console.error('Last.fm mobile session request failed:', e);
   }
   return null;
 }
