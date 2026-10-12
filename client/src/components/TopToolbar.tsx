@@ -12,8 +12,10 @@ import {
   SidebarOpen,
   Palette,
   ChevronDown,
+  Shuffle,
 } from 'lucide-react';
 import { useUiStore, ThemeName } from '../store/uiStore';
+import { usePlayerStore } from '../store/playerStore';
 import { SearchField } from '../types';
 import { api } from '../api/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -28,6 +30,7 @@ export const TopToolbar: React.FC = () => {
     setSearchQuery,
     searchField,
     setSearchField,
+    selectedRootId,
     selectedRootName,
     selectedArtistName,
     selectedAlbumTitle,
@@ -211,6 +214,27 @@ export const TopToolbar: React.FC = () => {
             <LayoutGrid size={13} />
           </button>
         </div>
+
+        {/* Shuffle Library / Collection button */}
+        <button
+          onClick={() => {
+            api.getTracks({
+              rootId: selectedRootId || undefined,
+              sortBy: 'random',
+              limit: 250,
+            }).then((res) => {
+              if (res.tracks.length > 0) {
+                usePlayerStore.getState().playTrack(res.tracks[0], res.tracks);
+                usePlayerStore.setState({ isShuffle: true });
+              }
+            }).catch((err) => console.error('Failed to shuffle library:', err));
+          }}
+          title={selectedRootName ? `Shuffle ${selectedRootName}` : 'Shuffle All'}
+          className="flex items-center space-x-1 bg-charcoal-800 hover:bg-charcoal-750 text-zinc-300 px-2 py-1 rounded border border-charcoal-700 transition cursor-pointer"
+        >
+          <Shuffle size={11} className="text-crimson-400" />
+          <span className="hidden sm:inline">Shuffle</span>
+        </button>
 
         {/* Scanner status / trigger button */}
         {scanStatus?.isRunning ? (

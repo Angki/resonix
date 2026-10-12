@@ -13,8 +13,10 @@ import {
   ChevronDown,
   Layers,
   X,
+  Shuffle,
 } from 'lucide-react';
 import { useUiStore } from '../store/uiStore';
+import { usePlayerStore } from '../store/playerStore';
 import { useResponsive } from '../hooks/useResponsive';
 import { api } from '../api/client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -88,6 +90,20 @@ export const LeftSidebar: React.FC = () => {
     window.addEventListener('mouseup', onMouseUp);
   };
 
+  const handleShuffleCollection = (e: React.MouseEvent, rootId?: string) => {
+    e.stopPropagation();
+    api.getTracks({
+      rootId,
+      sortBy: 'random',
+      limit: 250,
+    }).then((res) => {
+      if (res.tracks.length > 0) {
+        usePlayerStore.getState().playTrack(res.tracks[0], res.tracks);
+        usePlayerStore.setState({ isShuffle: true });
+      }
+    }).catch((err) => console.error('Failed to shuffle collection:', err));
+  };
+
   if (!leftSidebarOpen) return null;
 
   return (
@@ -137,9 +153,9 @@ export const LeftSidebar: React.FC = () => {
 
             {collectionsExpanded && (
               <div className="space-y-0.5">
-                <button
+                <div
                   onClick={() => handleNavClick(() => selectCollection(null))}
-                  className={`w-full flex items-center justify-between px-2 py-1.5 rounded transition ${
+                  className={`group w-full flex items-center justify-between px-2 py-1.5 rounded transition cursor-pointer ${
                     activeSection === 'all' && !selectedRootId
                       ? 'bg-crimson-900/40 text-zinc-100 font-medium border-l-2 border-crimson-600'
                       : 'text-zinc-400 hover:bg-charcoal-850 hover:text-zinc-200'
@@ -149,31 +165,47 @@ export const LeftSidebar: React.FC = () => {
                     <Folder size={13} className="text-zinc-400 shrink-0" />
                     <span className="truncate">All Collections</span>
                   </div>
-                </button>
+                  <button
+                    onClick={(e) => handleShuffleCollection(e)}
+                    title="Shuffle All Collections"
+                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-crimson-400 text-zinc-400 rounded transition cursor-pointer"
+                  >
+                    <Shuffle size={12} />
+                  </button>
+                </div>
 
                 {roots?.map((root) => {
                   const isSelected = activeSection === 'collection' && selectedRootId === root.id;
                   return (
-                    <button
+                    <div
                       key={root.id}
                       onClick={() => handleNavClick(() => selectCollection(root.id, root.name))}
-                      className={`w-full flex items-center justify-between px-2 py-1.5 rounded transition ${
+                      className={`group w-full flex items-center justify-between px-2 py-1.5 rounded transition cursor-pointer ${
                         isSelected
                           ? 'bg-crimson-900/40 text-zinc-100 font-medium border-l-2 border-crimson-600'
                           : 'text-zinc-400 hover:bg-charcoal-850 hover:text-zinc-200'
                       }`}
                     >
-                    <div className="flex items-center space-x-2 truncate">
-                      <Folder size={13} className="text-crimson-400/80 shrink-0" />
-                      <span className="truncate">{root.name}</span>
+                      <div className="flex items-center space-x-2 truncate">
+                        <Folder size={13} className="text-crimson-400/80 shrink-0" />
+                        <span className="truncate">{root.name}</span>
+                      </div>
+                      <div className="flex items-center space-x-1.5 shrink-0">
+                        <button
+                          onClick={(e) => handleShuffleCollection(e, root.id)}
+                          title={`Shuffle ${root.name}`}
+                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-crimson-400 text-zinc-400 rounded transition cursor-pointer"
+                        >
+                          <Shuffle size={12} />
+                        </button>
+                        <span className="font-mono text-[10px] text-zinc-600 bg-charcoal-850 px-1.5 py-0.2 rounded">
+                          {root.trackCount}
+                        </span>
+                      </div>
                     </div>
-                    <span className="font-mono text-[10px] text-zinc-600 bg-charcoal-850 px-1.5 py-0.2 rounded">
-                      {root.trackCount}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
           )}
         </div>
 
