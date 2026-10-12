@@ -17,6 +17,7 @@ import { useUiStore } from '../store/uiStore';
 import { useResponsive } from '../hooks/useResponsive';
 import { api } from '../api/client';
 import { ContextMenu } from './ContextMenu';
+import { AlphabetBar } from './AlphabetBar';
 
 interface TrackTableProps {
   tracks: Track[];
@@ -75,6 +76,26 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tracks: Track[] } | null>(null);
+  const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+
+  // Alphabetical letter index map for rapid jumping
+  const { availableLetters, letterIndexMap } = useMemo(() => {
+    const letters = new Set<string>();
+    const map = new Map<string, number>();
+
+    tracks.forEach((track, idx) => {
+      const fieldVal = sortBy === 'title' ? track.title : sortBy === 'albumTitle' ? track.albumTitle : track.artistName;
+      const firstChar = (fieldVal || '').trim().charAt(0).toUpperCase();
+      const char = /[A-Z]/.test(firstChar) ? firstChar : '#';
+
+      letters.add(char);
+      if (!map.has(char)) {
+        map.set(char, idx);
+      }
+    });
+
+    return { availableLetters: letters, letterIndexMap: map };
+  }, [tracks, sortBy]);
 
   // Virtualizer for 60fps rendering of thousands of tracks
   const rowVirtualizer = useVirtualizer({
@@ -83,6 +104,14 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
     estimateSize: () => (isMobile ? 44 : 32), // 44px on mobile (with subtitle), 32px compact on desktop
     overscan: 20,
   });
+
+  const handleJumpToLetter = (char: string) => {
+    setSelectedLetter(char);
+    const targetIdx = letterIndexMap.get(char);
+    if (targetIdx !== undefined && rowVirtualizer) {
+      rowVirtualizer.scrollToIndex(targetIdx, { align: 'start' });
+    }
+  };
 
   const handleRowClick = (track: Track, index: number, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -205,6 +234,15 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
 
   return (
     <div className="flex-1 flex flex-col h-full bg-charcoal-900 select-none overflow-hidden">
+      {/* Alphabet mini-scroller for rapid navigation */}
+      {availableLetters.size > 0 && (
+        <AlphabetBar
+          activeLetters={availableLetters}
+          selectedLetter={selectedLetter}
+          onSelectLetter={handleJumpToLetter}
+        />
+      )}
+
       {/* Table Header */}
       <div className="h-7 bg-charcoal-850 border-b border-charcoal-750 flex items-center text-[11px] font-mono text-zinc-400 font-medium px-2 shrink-0">
         <div className="w-7 sm:w-8 text-center shrink-0">#</div>

@@ -18,6 +18,7 @@ import { api } from '../api/client';
 import { useQuery } from '@tanstack/react-query';
 import { AlbumContextMenu } from './AlbumContextMenu';
 import { AlbumTracksModal } from './AlbumTracksModal';
+import { AlphabetBar } from './AlphabetBar';
 
 interface AlbumCardProps {
   album: Album;
@@ -232,6 +233,28 @@ export const AlbumGrid: React.FC = () => {
 
   const estimatedRowHeight = Math.round(usableWidth / columnCount + 70);
 
+  const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+
+  const { availableLetters, letterRowMap } = useMemo(() => {
+    const letters = new Set<string>();
+    const map = new Map<string, number>();
+    if (!albums || albums.length === 0) return { availableLetters: letters, letterRowMap: map };
+
+    albums.forEach((album, idx) => {
+      const fieldVal = albumSortBy === 'title' ? album.title : (album.artistName || album.title);
+      const firstChar = (fieldVal || '').trim().charAt(0).toUpperCase();
+      const char = /[A-Z]/.test(firstChar) ? firstChar : '#';
+
+      letters.add(char);
+      if (!map.has(char)) {
+        const rowIndex = Math.floor(idx / columnCount);
+        map.set(char, rowIndex);
+      }
+    });
+
+    return { availableLetters: letters, letterRowMap: map };
+  }, [albums, albumSortBy, columnCount]);
+
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -239,6 +262,14 @@ export const AlbumGrid: React.FC = () => {
     getItemKey: (index) => `${columnCount}-${index}`,
     overscan: 4,
   });
+
+  const handleJumpToLetter = (char: string) => {
+    setSelectedLetter(char);
+    const targetRow = letterRowMap.get(char);
+    if (targetRow !== undefined && rowVirtualizer) {
+      rowVirtualizer.scrollToIndex(targetRow, { align: 'start' });
+    }
+  };
 
   const handleOpenAlbumModal = useCallback((album: Album) => {
     setModalAlbum(album);
@@ -382,6 +413,15 @@ export const AlbumGrid: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Alphabet mini-scroller for rapid album navigation */}
+      {availableLetters.size > 0 && (
+        <AlphabetBar
+          activeLetters={availableLetters}
+          selectedLetter={selectedLetter}
+          onSelectLetter={handleJumpToLetter}
+        />
+      )}
 
       {/* Grid Content - Virtualized 60FPS Container with Fixed Height Cards */}
       <div
