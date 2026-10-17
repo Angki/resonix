@@ -18,6 +18,11 @@ interface PlayerState {
   sessionId: string | null;
   listenedSeconds: number;
   forceTranscode: boolean;
+  playNextRemaining: number;
+  isCrossfadeEnabled: boolean;
+  crossfadeSeconds: number;
+  isAutoAdvanceEnabled: boolean;
+  autoAdvanceTriggerSeconds: number;
 
   // Actions
   playTrack: (track: Track, newQueue?: Track[]) => void;
@@ -37,6 +42,10 @@ interface PlayerState {
   clearQueue: () => void;
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   setForceTranscode: (enabled: boolean) => void;
+  setIsCrossfadeEnabled: (enabled: boolean) => void;
+  setCrossfadeSeconds: (sec: number) => void;
+  setIsAutoAdvanceEnabled: (enabled: boolean) => void;
+  setAutoAdvanceTriggerSeconds: (sec: number) => void;
   setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
   setBufferedPercent: (percent: number) => void;
@@ -61,6 +70,11 @@ function loadPersistedState(): Partial<PlayerState> {
       queue: Array.isArray(parsed.queue) ? parsed.queue : [],
       queueIndex: typeof parsed.queueIndex === 'number' ? parsed.queueIndex : -1,
       forceTranscode: !!parsed.forceTranscode,
+      playNextRemaining: typeof parsed.playNextRemaining === 'number' ? parsed.playNextRemaining : 0,
+      isCrossfadeEnabled: parsed.isCrossfadeEnabled !== undefined ? !!parsed.isCrossfadeEnabled : false,
+      crossfadeSeconds: typeof parsed.crossfadeSeconds === 'number' ? parsed.crossfadeSeconds : 3,
+      isAutoAdvanceEnabled: parsed.isAutoAdvanceEnabled !== undefined ? !!parsed.isAutoAdvanceEnabled : true,
+      autoAdvanceTriggerSeconds: typeof parsed.autoAdvanceTriggerSeconds === 'number' ? parsed.autoAdvanceTriggerSeconds : 1.5,
     };
   } catch {
     return {};
@@ -78,6 +92,11 @@ function persistState(state: PlayerState) {
       queue: state.queue,
       queueIndex: state.queueIndex,
       forceTranscode: state.forceTranscode,
+      playNextRemaining: state.playNextRemaining,
+      isCrossfadeEnabled: state.isCrossfadeEnabled,
+      crossfadeSeconds: state.crossfadeSeconds,
+      isAutoAdvanceEnabled: state.isAutoAdvanceEnabled,
+      autoAdvanceTriggerSeconds: state.autoAdvanceTriggerSeconds,
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -102,6 +121,11 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   sessionId: null,
   listenedSeconds: 0,
   forceTranscode: persisted.forceTranscode ?? false,
+  playNextRemaining: persisted.playNextRemaining ?? 0,
+  isCrossfadeEnabled: persisted.isCrossfadeEnabled ?? false,
+  crossfadeSeconds: persisted.crossfadeSeconds ?? 3,
+  isAutoAdvanceEnabled: persisted.isAutoAdvanceEnabled ?? true,
+  autoAdvanceTriggerSeconds: persisted.autoAdvanceTriggerSeconds ?? 1.5,
 
   playTrack: (track, newQueue) => {
     let queue = get().queue;
@@ -130,6 +154,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
       duration: track.duration,
       sessionId: null,
       listenedSeconds: 0,
+      playNextRemaining: 0,
     });
     persistState(get());
   },
@@ -142,7 +167,7 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
   resume: () => set({ isPlaying: true }),
 
   next: () => {
-    const { queue, queueIndex, repeatMode, isShuffle } = get();
+    const { queue, queueIndex, repeatMode, isShuffle, playNextRemaining } = get();
     if (queue.length === 0) return;
 
     if (repeatMode === 'one') {
@@ -151,13 +176,16 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
     }
 
     let nextIndex = queueIndex + 1;
-    if (isShuffle) {
+    if (playNextRemaining > 0 && nextIndex < queue.length) {
+      // Prioritize tracks queued with Play Next in their intended sequence
+      set({ playNextRemaining: Math.max(0, playNextRemaining - 1) });
+    } else if (isShuffle) {
       nextIndex = Math.floor(Math.random() * queue.length);
     } else if (nextIndex >= queue.length) {
       if (repeatMode === 'all') {
         nextIndex = 0;
       } else {
-        set({ isPlaying: false });
+        set({ isPlaying: false, playNextRemaining: 0 });
         return;
       }
     }
@@ -242,25 +270,36 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   playNext: (tracks) => {
     const toAdd = Array.isArray(tracks) ? tracks : [tracks];
-    const { queue, queueIndex } = get();
-    const before = queue.slice(0, queueIndex + 1);
-    const after = queue.slice(queueIndex + 1);
-    set({ queue: [...before, ...toAdd, ...after] });
+    if (toAdd.length === 0) return;
+    const { queue, queueIndex, playNextRemaining } = get();
+    const insertIdx = queueIndex >= 0 ? queueIndex : 0;
+    const before = queue.slice(0, insertIdx + 1);
+    const after = queue.slice(insertIdx + 1);
+    set({
+      queue: [...before, ...toAdd, ...after],
+      playNextRemaining: (playNextRemaining || 0) + toAdd.length,
+    });
     persistState(get());
   },
 
   removeFromQueue: (index) => {
-    const { queue, queueIndex } = get();
+    const { queue, queueIndex, playNextRemaining } = get();
     const updated = queue.filter((_, i) => i !== index);
     let newIndex = queueIndex;
     if (index < queueIndex) newIndex--;
     else if (index === queueIndex && newIndex >= updated.length) newIndex = updated.length - 1;
-    set({ queue: updated, queueIndex: newIndex });
+
+    let newPlayNextRemaining = playNextRemaining;
+    if (index > queueIndex && index <= queueIndex + playNextRemaining) {
+      newPlayNextRemaining = Math.max(0, playNextRemaining - 1);
+    }
+
+    set({ queue: updated, queueIndex: newIndex, playNextRemaining: newPlayNextRemaining });
     persistState(get());
   },
 
   clearQueue: () => {
-    set({ queue: [], queueIndex: -1 });
+    set({ queue: [], queueIndex: -1, playNextRemaining: 0 });
     persistState(get());
   },
 
@@ -281,6 +320,26 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   setForceTranscode: (enabled) => {
     set({ forceTranscode: enabled });
+    persistState(get());
+  },
+
+  setIsCrossfadeEnabled: (enabled) => {
+    set({ isCrossfadeEnabled: enabled });
+    persistState(get());
+  },
+
+  setCrossfadeSeconds: (sec) => {
+    set({ crossfadeSeconds: sec });
+    persistState(get());
+  },
+
+  setIsAutoAdvanceEnabled: (enabled) => {
+    set({ isAutoAdvanceEnabled: enabled });
+    persistState(get());
+  },
+
+  setAutoAdvanceTriggerSeconds: (sec) => {
+    set({ autoAdvanceTriggerSeconds: sec });
     persistState(get());
   },
 

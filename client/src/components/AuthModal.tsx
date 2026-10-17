@@ -118,7 +118,7 @@ export const AuthModal: React.FC = () => {
             >
               {isSetup && (
                 <p className="text-zinc-400 text-[11.5px] leading-relaxed">
-                  Welcome to Black Library. Create your master administrator account to secure streaming and settings.
+                  Welcome to Resonix. Create your master administrator account to secure streaming and settings.
                 </p>
               )}
 

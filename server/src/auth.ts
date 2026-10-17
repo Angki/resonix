@@ -1,6 +1,7 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from './db.js';
 import { verifySession } from './crypto.js';
+import { config } from './config.js';
 
 export interface AuthUser {
   id: string;
@@ -46,42 +47,12 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
     (req.query as any)?.token;
 
   if (!sessionToken) {
-    // Single-user personal vault: default to angki_ang or admin user
-    const defaultUser =
-      (await prisma.user.findUnique({
-        where: { username: 'angki_ang' },
-        select: { id: true, username: true, role: true },
-      })) ||
-      (await prisma.user.findFirst({
-        where: { role: 'admin' },
-        select: { id: true, username: true, role: true },
-      }));
-
-    if (defaultUser) {
-      req.user = defaultUser;
-      return;
-    }
-
     if (isOptionalAuth) return;
     return reply.status(401).send({ error: 'Authentication required' });
   }
 
   const verified = verifySession(sessionToken);
   if (!verified) {
-    const defaultUser =
-      (await prisma.user.findUnique({
-        where: { username: 'angki_ang' },
-        select: { id: true, username: true, role: true },
-      })) ||
-      (await prisma.user.findFirst({
-        where: { role: 'admin' },
-        select: { id: true, username: true, role: true },
-      }));
-    if (defaultUser) {
-      req.user = defaultUser;
-      return;
-    }
-
     if (isOptionalAuth) return;
     return reply.status(401).send({ error: 'Session expired or invalid' });
   }
@@ -98,15 +69,20 @@ export async function authenticate(req: FastifyRequest, reply: FastifyReply) {
 
   req.user = user;
 
-  // Basic CSRF defense: check Origin / Referer on mutations
+  // Origin / Referer CSRF defense on state-changing requests
   if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
-    const origin = req.headers.origin || req.headers.referer;
-    const customHeader = req.headers['x-requested-with'];
-    // Allow if request has X-Requested-With or standard same-host origin
-    if (!origin && !customHeader) {
-      // Allow for internal API tests if configured
+    const origin = req.headers.origin;
+    if (origin && !config.allowedOrigins.includes(origin)) {
+      // In PERSONAL/LAN mode, allow localhost/127.0.0.1 variants or configured origins
+      try {
+        const originUrl = new URL(origin);
+        const isLocal = originUrl.hostname === 'localhost' || originUrl.hostname === '127.0.0.1';
+        if (!isLocal && !config.allowedOrigins.includes(origin)) {
+          return reply.status(403).send({ error: 'Cross-origin request blocked by CSRF policy' });
+        }
+      } catch {
+        return reply.status(403).send({ error: 'Malformed Origin header' });
+      }
     }
   }
-
-  req.user = user;
 }

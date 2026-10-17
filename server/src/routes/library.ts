@@ -25,6 +25,10 @@ export async function libraryRoutes(app: FastifyInstance) {
   });
 
   app.post('/roots', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to add library roots' });
+    }
+
     const bodySchema = z.object({
       name: z.string().min(1),
       path: z.string().min(1),
@@ -53,6 +57,10 @@ export async function libraryRoutes(app: FastifyInstance) {
   });
 
   app.patch('/roots/:id', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to modify library roots' });
+    }
+
     const { id } = req.params as { id: string };
     const bodySchema = z.object({
       name: z.string().optional(),
@@ -70,13 +78,21 @@ export async function libraryRoutes(app: FastifyInstance) {
     return updated;
   });
 
-  app.post('/scan', async (req) => {
+  app.post('/scan', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to trigger library scans' });
+    }
+
     const { rootId } = (req.body as { rootId?: string }) || {};
     const status = await runLibraryScan(rootId);
     return { success: true, status };
   });
 
-  app.post('/scan/cancel', async () => {
+  app.post('/scan/cancel', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to cancel library scans' });
+    }
+
     const cancelled = requestScanCancellation();
     return { success: cancelled };
   });
@@ -106,6 +122,102 @@ export async function libraryRoutes(app: FastifyInstance) {
       totalPlaylists,
       totalDurationSeconds: aggregate._sum.duration || 0,
       totalFileSizeBytes: aggregate._sum.fileSize ? aggregate._sum.fileSize.toString() : '0',
+    };
+  });
+
+  app.get('/audit', async () => {
+    const [totalTracks, totalAlbums, totalArtists, totalRoots] = await Promise.all([
+      prisma.track.count({ where: { isUnavailable: false } }),
+      prisma.album.count(),
+      prisma.artist.count(),
+      prisma.libraryRoot.count({ where: { isEnabled: true } }),
+    ]);
+
+    const qualityStats = await prisma.track.groupBy({
+      by: ['isLossless', 'codec'],
+      where: { isUnavailable: false },
+      _count: { id: true },
+    });
+
+    const hiResCount = await prisma.track.count({
+      where: {
+        isUnavailable: false,
+        isLossless: true,
+        OR: [
+          { bitDepth: { gte: 24 } },
+          { sampleRate: { gt: 48000 } },
+        ],
+      },
+    });
+
+    const cdLosslessCount = await prisma.track.count({
+      where: {
+        isUnavailable: false,
+        isLossless: true,
+        AND: [
+          { OR: [{ bitDepth: null }, { bitDepth: { lt: 24 } }] },
+          { OR: [{ sampleRate: null }, { sampleRate: { lte: 48000 } }] },
+        ],
+      },
+    });
+
+    const highLossyCount = await prisma.track.count({
+      where: {
+        isUnavailable: false,
+        isLossless: false,
+        bitrate: { gte: 320 },
+      },
+    });
+
+    const lowLossyCount = await prisma.track.count({
+      where: {
+        isUnavailable: false,
+        isLossless: false,
+        bitrate: { lt: 320 },
+      },
+    });
+
+    const [missingGenre, missingYear, missingArtwork, missingTrackNumber, unavailableTracks] = await Promise.all([
+      prisma.track.count({ where: { isUnavailable: false, genre: null } }),
+      prisma.track.count({ where: { isUnavailable: false, year: null } }),
+      prisma.album.count({ where: { artworkId: null } }),
+      prisma.track.count({ where: { isUnavailable: false, trackNumber: null } }),
+      prisma.track.count({ where: { isUnavailable: true } }),
+    ]);
+
+    const codecMap: Record<string, number> = {};
+    for (const s of qualityStats) {
+      const c = (s.codec || 'UNKNOWN').toUpperCase();
+      codecMap[c] = (codecMap[c] || 0) + s._count.id;
+    }
+
+    const healthPenalty = (missingGenre * 0.5 + missingYear * 0.5 + missingArtwork * 2 + missingTrackNumber * 0.5 + unavailableTracks * 3);
+    const healthDenominator = Math.max(1, totalTracks + totalAlbums);
+    const healthScore = Math.max(0, Math.min(100, Math.round(100 - (healthPenalty / healthDenominator) * 100)));
+
+    return {
+      totals: {
+        tracks: totalTracks,
+        albums: totalAlbums,
+        artists: totalArtists,
+        roots: totalRoots,
+      },
+      quality: {
+        hiRes: hiResCount,
+        cdLossless: cdLosslessCount,
+        highLossy: highLossyCount,
+        lowLossy: lowLossyCount,
+        losslessPercent: totalTracks > 0 ? Math.round(((hiResCount + cdLosslessCount) / totalTracks) * 100) : 0,
+        codecs: codecMap,
+      },
+      metadataHealth: {
+        missingGenre,
+        missingYear,
+        missingArtworkAlbums: missingArtwork,
+        missingTrackNumber,
+        unavailableTracks,
+        healthScore,
+      },
     };
   });
 }

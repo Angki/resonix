@@ -10,7 +10,9 @@ import {
   FileAudio,
   Hash,
   Database,
+  Mic2,
 } from 'lucide-react';
+import { LyricsView } from './LyricsView';
 import { useUiStore } from '../store/uiStore';
 import { usePlayerStore } from '../store/playerStore';
 import { useResponsive } from '../hooks/useResponsive';
@@ -138,6 +140,17 @@ export const RightPanel: React.FC = () => {
           >
             <Info size={13} />
             <span>Details</span>
+          </button>
+          <button
+            onClick={() => setRightPanelTab('lyrics')}
+            className={`flex items-center space-x-1 px-2.5 py-1 rounded text-xs transition ${
+              rightPanelTab === 'lyrics'
+                ? 'bg-charcoal-800 text-zinc-100 font-medium'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Mic2 size={13} className={rightPanelTab === 'lyrics' ? 'text-crimson-400' : ''} />
+            <span>Lirik</span>
           </button>
         </div>
 
@@ -328,7 +341,7 @@ export const RightPanel: React.FC = () => {
                   </div>
                   <div className="space-y-1 text-zinc-300">
                     <p><span className="text-zinc-500">Local Play Count:</span> {currentTrack.localPlayCount}</p>
-                    <p><span className="text-zinc-500">MusicBee Imported:</span> {currentTrack.importedPlayCount}</p>
+                    <p><span className="text-zinc-500">Imported Plays:</span> {currentTrack.importedPlayCount}</p>
                     <p><span className="text-zinc-500">Combined Count:</span> {currentTrack.combinedPlayCount}</p>
                     <p><span className="text-zinc-500">Last Played:</span> {currentTrack.lastPlayed ? new Date(currentTrack.lastPlayed).toLocaleString() : 'Never'}</p>
                   </div>
@@ -339,6 +352,9 @@ export const RightPanel: React.FC = () => {
             )}
           </div>
         )}
+
+        {/* Tab 4: Lyrics */}
+        {rightPanelTab === 'lyrics' && <LyricsView />}
       </div>
     </aside>
   </>

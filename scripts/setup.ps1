@@ -1,8 +1,8 @@
-# Black Library - Windows Native Setup Script
+# Resonix - Setup & Verification Script
 # Run in PowerShell: .\scripts\setup.ps1
 
 Write-Host "======================================================" -ForegroundColor Cyan
-Write-Host "  BLACK LIBRARY - SETUP & DEPENDENCY VERIFICATION" -ForegroundColor Cyan
+Write-Host "  RESONIX - SETUP & DEPENDENCY VERIFICATION" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
 # Check Node.js

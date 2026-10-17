@@ -51,7 +51,13 @@ export async function reportPlaybackProgress(params: {
     where: { eventId },
   });
   if (existingEvent) {
-    return { status: 'already_recorded', thresholdReached: existingEvent.thresholdReached };
+    const session = await prisma.playbackSession.findUnique({ where: { id: sessionId } });
+    return {
+      status: 'already_recorded',
+      thresholdReached: existingEvent.thresholdReached,
+      playCountIncremented: false,
+      isCompleted: session?.isCompleted || existingEvent.thresholdReached,
+    };
   }
 
   const track = await prisma.track.findUnique({
@@ -149,6 +155,7 @@ export async function reportPlaybackProgress(params: {
     status: 'recorded',
     thresholdReached: reached,
     playCountIncremented,
+    isCompleted: session ? (session.isCompleted || reached) : reached,
   };
 }
 

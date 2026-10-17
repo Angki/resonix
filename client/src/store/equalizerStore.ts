@@ -148,9 +148,13 @@ interface EqualizerState {
   preAmp: number;
   activePreset: string;
   isNormalizerEnabled: boolean;
+  isCrossfeedEnabled: boolean;
 
   toggleEnabled: () => void;
   toggleNormalizer: () => void;
+  setNormalizerEnabled: (enabled: boolean) => void;
+  toggleCrossfeed: () => void;
+  setCrossfeedEnabled: (enabled: boolean) => void;
   setBandMode: (mode: EqBandMode) => void;
   setBandGain10: (index: number, gain: number) => void;
   setBandGain5: (index: number, gain: number) => void;
@@ -207,6 +211,7 @@ function persistEq(state: {
   preAmp: number;
   activePreset: string;
   isNormalizerEnabled: boolean;
+  isCrossfeedEnabled: boolean;
 }) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -233,6 +238,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
   preAmp: typeof persisted.preAmp === 'number' ? persisted.preAmp : 0,
   activePreset: persisted.activePreset ?? 'Flat',
   isNormalizerEnabled: persisted.isNormalizerEnabled ?? false,
+  isCrossfeedEnabled: persisted.isCrossfeedEnabled ?? false,
 
   toggleEnabled: () => {
     const next = !get().isEnabled;
@@ -245,6 +251,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: get().preAmp,
       activePreset: get().activePreset,
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 
@@ -259,6 +266,50 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: get().preAmp,
       activePreset: get().activePreset,
       isNormalizerEnabled: next,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
+    });
+  },
+
+  setNormalizerEnabled: (enabled: boolean) => {
+    set({ isNormalizerEnabled: enabled });
+    persistEq({
+      isEnabled: get().isEnabled,
+      bandMode: get().bandMode,
+      gains: get().gains,
+      gains5: get().gains5,
+      preAmp: get().preAmp,
+      activePreset: get().activePreset,
+      isNormalizerEnabled: enabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
+    });
+  },
+
+  toggleCrossfeed: () => {
+    const next = !get().isCrossfeedEnabled;
+    set({ isCrossfeedEnabled: next });
+    persistEq({
+      isEnabled: get().isEnabled,
+      bandMode: get().bandMode,
+      gains: get().gains,
+      gains5: get().gains5,
+      preAmp: get().preAmp,
+      activePreset: get().activePreset,
+      isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: next,
+    });
+  },
+
+  setCrossfeedEnabled: (enabled: boolean) => {
+    set({ isCrossfeedEnabled: enabled });
+    persistEq({
+      isEnabled: get().isEnabled,
+      bandMode: get().bandMode,
+      gains: get().gains,
+      gains5: get().gains5,
+      preAmp: get().preAmp,
+      activePreset: get().activePreset,
+      isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: enabled,
     });
   },
 
@@ -272,6 +323,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: get().preAmp,
       activePreset: get().activePreset,
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 
@@ -290,6 +342,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: get().preAmp,
       activePreset: 'Custom',
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 
@@ -308,6 +361,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: get().preAmp,
       activePreset: 'Custom',
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 
@@ -322,6 +376,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: clamped,
       activePreset: get().activePreset,
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 
@@ -344,6 +399,7 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
         preAmp: get().preAmp,
         activePreset: preset.name,
         isNormalizerEnabled: get().isNormalizerEnabled,
+        isCrossfeedEnabled: get().isCrossfeedEnabled,
       });
     }
   },
@@ -360,6 +416,9 @@ export const useEqualizerStore = create<EqualizerState>((set, get) => ({
       preAmp: 0,
       activePreset: 'Flat',
       isNormalizerEnabled: get().isNormalizerEnabled,
+      isCrossfeedEnabled: get().isCrossfeedEnabled,
     });
   },
 }));
+
+

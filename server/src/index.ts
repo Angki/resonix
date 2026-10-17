@@ -8,8 +8,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 import { config } from './config.js';
-import { prisma, ensureDefaultSettings } from './db.js';
+import { prisma, ensureDefaultSettings, runDatabaseOptimization } from './db.js';
 import { authenticate } from './auth.js';
+import { initializeBootstrapToken } from './bootstrap.js';
 import { processScrobbleQueue } from './lastfm/api.js';
 import { startLibraryWatcher, stopLibraryWatcher } from './library/watcher.js';
 
@@ -23,6 +24,10 @@ import { playlistsRoutes } from './routes/playlists.js';
 import { musicBeeRoutes } from './routes/musicbee.js';
 import { lastFmRoutes } from './routes/lastfm.js';
 import { settingsRoutes } from './routes/settings.js';
+import { artistsRoutes } from './routes/artists.js';
+import { lyricsRoutes } from './routes/lyrics.js';
+import { smartPlaylistsRoutes } from './routes/smartPlaylists.js';
+import { subsonicRoutes } from './routes/subsonic.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,9 +55,29 @@ await app.register(cookie, {
 });
 
 await app.register(cors, {
-  origin: true,
+  origin: (origin, cb) => {
+    // Direct requests (no Origin header, e.g. same-origin, curl, desktop apps)
+    if (!origin) {
+      return cb(null, true);
+    }
+
+    try {
+      const url = new URL(origin);
+      const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+
+      if (isLocalhost || config.allowedOrigins.includes(origin)) {
+        return cb(null, true);
+      }
+    } catch {
+      return cb(new Error('Invalid origin format'), false);
+    }
+
+    // Disallow untrusted cross-origin requests with credentials
+    return cb(null, false);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+  exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'X-Transcoded-Stream', 'X-Transcode-Offset'],
 });
 
 await app.register(rateLimit, {
@@ -65,8 +90,23 @@ await app.register(rateLimit, {
   },
 });
 
+// Public Health Check Endpoint for Docker/Kubernetes/monitoring
+app.get('/api/health', async () => {
+  return {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    service: 'resonix-server',
+    version: '1.0.0',
+    uptime: Math.round(process.uptime()),
+    database: 'connected',
+  };
+});
+
 // Authentication hook for /api routes
 app.addHook('onRequest', async (req, reply) => {
+  if (req.url === '/api/health' || req.url.startsWith('/api/health?')) {
+    return;
+  }
   if (req.url.startsWith('/api')) {
     await authenticate(req, reply);
   }
@@ -81,8 +121,13 @@ app.register(artworkRoutes, { prefix: '/api/artwork' });
 app.register(playbackRoutes, { prefix: '/api/playback' });
 app.register(playlistsRoutes, { prefix: '/api/playlists' });
 app.register(musicBeeRoutes, { prefix: '/api/musicbee' });
+app.register(musicBeeRoutes, { prefix: '/api/external-playlists' });
 app.register(lastFmRoutes, { prefix: '/api/lastfm' });
 app.register(settingsRoutes, { prefix: '/api/settings' });
+app.register(artistsRoutes, { prefix: '/api/artists' });
+app.register(lyricsRoutes, { prefix: '/api/lyrics' });
+app.register(smartPlaylistsRoutes, { prefix: '/api/smart-playlists' });
+app.register(subsonicRoutes, { prefix: '/rest' });
 
 // Static Frontend Serving in Production
 const publicPath = path.resolve(__dirname, '../public');
@@ -94,8 +139,8 @@ if (fs.existsSync(publicPath)) {
 
   // SPA fallback for HTML5 history routing
   app.setNotFoundHandler((req, reply) => {
-    if (req.url.startsWith('/api')) {
-      return reply.status(404).send({ error: 'API endpoint not found' });
+    if (req.url.startsWith('/api') || req.url.startsWith('/rest')) {
+      return reply.status(404).send({ error: 'API or Subsonic endpoint not found' });
     }
     const indexFile = path.join(publicPath, 'index.html');
     if (fs.existsSync(indexFile)) {
@@ -113,10 +158,24 @@ setInterval(() => {
   });
 }, 60000);
 
+// Periodic SQLite optimization & WAL checkpointing (every 6 hours)
+setInterval(() => {
+  runDatabaseOptimization().catch(err => {
+    console.error('Database maintenance error:', err);
+  });
+}, 6 * 60 * 60 * 1000);
+
 // Server startup
 async function start() {
   try {
     await ensureDefaultSettings();
+    setTimeout(() => {
+      runDatabaseOptimization().catch(() => {});
+    }, 5000);
+    const userCount = await prisma.user.count();
+    if (userCount === 0) {
+      initializeBootstrapToken();
+    }
     startLibraryWatcher().catch(err => console.warn('Watcher startup failed:', err));
 
     await app.listen({
@@ -125,7 +184,7 @@ async function start() {
     });
 
     console.log(`\n======================================================`);
-    console.log(`🔥 BLACK LIBRARY SERVER ACTIVE`);
+    console.log(`🚀 RESONIX SERVER ACTIVE`);
     console.log(`📡 URL: http://${config.HOST}:${config.PORT}`);
     console.log(`🔒 Mode: Tailscale-ready (Listen on ${config.HOST})`);
     console.log(`📂 Collections: ${config.libraryRoots.join(', ')}`);

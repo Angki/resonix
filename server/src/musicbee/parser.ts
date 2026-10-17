@@ -203,7 +203,7 @@ export async function executeMusicBeePlaylistImport(userId: string, playlistPath
     data: {
       userId,
       name: preview.playlistName,
-      description: `Imported from MusicBee playlist: ${path.basename(playlistPath)}`,
+      description: `Imported from external playlist: ${path.basename(playlistPath)}`,
       isSmart: false,
     },
   });

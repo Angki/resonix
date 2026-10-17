@@ -1,9 +1,11 @@
-const CACHE_NAME = 'black-library-v3';
+const CACHE_NAME = 'black-library-v5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/icon.svg'
+  '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -37,11 +39,54 @@ self.addEventListener('message', (event) => {
   }
 });
 
+const AUDIO_CACHE_NAME = 'audio-cache-v1';
+
+async function handleAudioStreamFetch(request) {
+  try {
+    const cache = await caches.open(AUDIO_CACHE_NAME);
+    const cachedResponse = await cache.match(request.url, { ignoreSearch: true });
+
+    if (!cachedResponse) {
+      return fetch(request);
+    }
+
+    const rangeHeader = request.headers.get('Range');
+    if (!rangeHeader) {
+      return cachedResponse;
+    }
+
+    const arrayBuffer = await cachedResponse.arrayBuffer();
+    const bytes = rangeHeader.replace(/bytes=/, '').split('-');
+    const start = parseInt(bytes[0], 10) || 0;
+    const end = bytes[1] ? parseInt(bytes[1], 10) : arrayBuffer.byteLength - 1;
+
+    const sliced = arrayBuffer.slice(start, end + 1);
+    return new Response(sliced, {
+      status: 206,
+      statusText: 'Partial Content',
+      headers: {
+        'Content-Range': `bytes ${start}-${end}/${arrayBuffer.byteLength}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(sliced.byteLength),
+        'Content-Type': cachedResponse.headers.get('Content-Type') || 'audio/mpeg',
+      },
+    });
+  } catch {
+    return fetch(request);
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Never cache API, stream requests, or non-GET requests
-  if (url.pathname.startsWith('/api/') || event.request.method !== 'GET') {
+  // 1. Audio stream requests: check offline audio cache with Range (206) support
+  if (url.pathname.startsWith('/api/stream/')) {
+    event.respondWith(handleAudioStreamFetch(event.request));
+    return;
+  }
+
+  // 2. Never cache other API routes or non-GET requests
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/rest/') || event.request.method !== 'GET') {
     return;
   }
 

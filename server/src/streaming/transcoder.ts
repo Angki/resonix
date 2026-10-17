@@ -1,4 +1,4 @@
-import { spawn, execSync, ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, execSync, exec, ChildProcessWithoutNullStreams } from 'child_process';
 import { Readable } from 'stream';
 import { config } from '../config.js';
 
@@ -78,9 +78,18 @@ export function startAudioTranscode(options: TranscodeOptions): {
     if (!killed) {
       killed = true;
       try {
-        proc.kill('SIGTERM');
+        if (process.platform === 'win32' && proc.pid) {
+          // Asynchronous non-blocking taskkill on Windows prevents event loop freeze
+          exec(`taskkill /pid ${proc.pid} /t /f`, () => {});
+        } else {
+          proc.kill('SIGTERM');
+        }
       } catch {
-        // ignore
+        try {
+          proc.kill();
+        } catch {
+          // ignore
+        }
       }
       activeTranscodesCount = Math.max(0, activeTranscodesCount - 1);
     }

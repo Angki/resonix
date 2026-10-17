@@ -1,10 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../db.js';
-import { hashPassword, verifyPassword, signSession } from '../crypto.js';
+import { hashPassword, verifyPassword, signSession, encryptSecret } from '../crypto.js';
+import { verifyBootstrapToken, consumeBootstrapToken } from '../bootstrap.js';
 
 export async function authRoutes(app: FastifyInstance) {
-  app.get('/status', async (req, reply) => {
+  app.get('/status', async (req) => {
     const userCount = await prisma.user.count();
     if (userCount === 0) {
       return { needsSetup: true, authenticated: false };
@@ -18,31 +19,24 @@ export async function authRoutes(app: FastifyInstance) {
       };
     }
 
-    const defaultUser =
-      (await prisma.user.findUnique({
-        where: { username: 'angki_ang' },
-        select: { id: true, username: true, role: true },
-      })) ||
-      (await prisma.user.findFirst({
-        where: { role: 'admin' },
-        select: { id: true, username: true, role: true },
-      }));
-
-    if (defaultUser) {
-      return {
-        needsSetup: false,
-        authenticated: true,
-        user: defaultUser,
-      };
-    }
-
     return { needsSetup: false, authenticated: false };
   });
 
   app.post('/setup', async (req, reply) => {
     const count = await prisma.user.count();
     if (count > 0) {
-      return reply.status(400).send({ error: 'Setup already completed' });
+      return reply.status(403).send({ error: 'Setup already completed and is permanently disabled' });
+    }
+
+    // Require loopback or valid bootstrap token
+    const rawIp = req.ip || req.raw.socket?.remoteAddress || '';
+    const isLoopback = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1' || rawIp === 'localhost';
+    const candidateToken = (req.headers['x-bootstrap-token'] as string) || (req.query as any)?.token;
+
+    if (!isLoopback && !verifyBootstrapToken(candidateToken)) {
+      return reply.status(403).send({
+        error: 'Initial setup must be performed from the local server machine or with a valid X-Bootstrap-Token',
+      });
     }
 
     const bodySchema = z.object({
@@ -63,6 +57,14 @@ export async function authRoutes(app: FastifyInstance) {
         role: 'admin',
       },
     });
+
+    await prisma.setting.upsert({
+      where: { key: `subsonic_pw_${user.id}` },
+      update: { value: encryptSecret(parsed.data.password) },
+      create: { key: `subsonic_pw_${user.id}`, value: encryptSecret(parsed.data.password) },
+    }).catch(() => {});
+
+    consumeBootstrapToken();
 
     const token = signSession(user.id);
     const isHttps = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https';
@@ -109,6 +111,13 @@ export async function authRoutes(app: FastifyInstance) {
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
+
+    // Auto-cache encrypted password for Subsonic API compatibility
+    await prisma.setting.upsert({
+      where: { key: `subsonic_pw_${user.id}` },
+      update: { value: encryptSecret(parsed.data.password) },
+      create: { key: `subsonic_pw_${user.id}`, value: encryptSecret(parsed.data.password) },
+    }).catch(() => {});
 
     const token = signSession(user.id);
     const isHttps = req.protocol === 'https' || req.headers['x-forwarded-proto'] === 'https';

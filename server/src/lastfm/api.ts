@@ -183,11 +183,17 @@ export async function submitScrobble(
         ? data.scrobbles.scrobble[0]
         : data.scrobbles.scrobble;
 
-      if (scrobble?.ignoredMessage?.code !== '0') {
-        return { success: true, ignored: true };
+      const ignoredCode = scrobble?.ignoredMessage?.code;
+      if (ignoredCode && String(ignoredCode) !== '0') {
+        return {
+          success: true,
+          ignored: true,
+          error: scrobble?.ignoredMessage?.['#text'] || `Ignored by Last.fm (code ${ignoredCode})`,
+        };
       }
       return { success: true };
     }
+
 
     return { success: false, error: data.message || 'Scrobble submission failed' };
   } catch (e: any) {
@@ -197,23 +203,31 @@ export async function submitScrobble(
 
 // Background durable scrobble queue processor
 let scrobbleWorkerRunning = false;
+let rerunRequested = false;
 
 export async function processScrobbleQueue() {
-  if (scrobbleWorkerRunning) return;
+  if (scrobbleWorkerRunning) {
+    rerunRequested = true;
+    return;
+  }
   scrobbleWorkerRunning = true;
 
   try {
-    const pendingJobs = await prisma.scrobbleJob.findMany({
-      where: {
-        status: 'pending',
-        OR: [
-          { nextRetryAt: null },
-          { nextRetryAt: { lte: new Date() } },
-        ],
-      },
-      take: 20,
-      orderBy: { createdAt: 'asc' },
-    });
+    do {
+      rerunRequested = false;
+      const pendingJobs = await prisma.scrobbleJob.findMany({
+        where: {
+          status: 'pending',
+          OR: [
+            { nextRetryAt: null },
+            { nextRetryAt: { lte: new Date() } },
+          ],
+        },
+        take: 20,
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (pendingJobs.length === 0) break;
 
     for (const job of pendingJobs) {
       const account = await prisma.lastFmAccount.findUnique({
@@ -273,10 +287,118 @@ export async function processScrobbleQueue() {
           });
         }
       }
-    }
+      }
+    } while (rerunRequested);
   } catch (e) {
     console.error('Error in scrobble queue processor:', e);
   } finally {
     scrobbleWorkerRunning = false;
   }
 }
+
+/**
+ * Fetch track metadata and user play count from Last.fm
+ */
+export async function getTrackInfo(
+  artist: string,
+  track: string,
+  username?: string
+): Promise<{ userPlayCount: number; listeners: number; playCount: number; userLoved: boolean } | null> {
+  const { apiKey } = await getLastFmCredentials();
+  if (!apiKey) return null;
+
+  const params: Record<string, string> = {
+    method: 'track.getInfo',
+    api_key: apiKey,
+    artist,
+    track,
+    autocorrect: '1',
+    format: 'json',
+    ...(username ? { username } : {}),
+  };
+
+  try {
+    const query = new URLSearchParams(params);
+    const res = await fetch(`${LASTFM_API_ROOT}?${query.toString()}`);
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn(`Last.fm track.getInfo HTTP ${res.status} for ${artist} - ${track}: ${text.slice(0, 100)}`);
+      return null;
+    }
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.warn(`Last.fm response for ${artist} - ${track} not JSON: ${text.slice(0, 100)}`);
+      return null;
+    }
+
+    if (data?.track) {
+      const userPlayCount = data.track.userplaycount ? parseInt(data.track.userplaycount, 10) : 0;
+      const listeners = data.track.listeners ? parseInt(data.track.listeners, 10) : 0;
+      const playCount = data.track.playcount ? parseInt(data.track.playcount, 10) : 0;
+      const userLoved = data.track.userloved === '1';
+      return {
+        userPlayCount: isNaN(userPlayCount) ? 0 : userPlayCount,
+        listeners: isNaN(listeners) ? 0 : listeners,
+        playCount: isNaN(playCount) ? 0 : playCount,
+        userLoved,
+      };
+    }
+  } catch (e) {
+    console.error(`Failed to fetch Last.fm info for ${artist} - ${track}:`, e);
+  }
+  return null;
+}
+
+/**
+ * Fetch a user's all-time top tracks from Last.fm
+ */
+export async function getUserTopTracks(
+  username: string,
+  limit = 500,
+  page = 1
+): Promise<Array<{ title: string; artist: string; playCount: number }> | null> {
+  const { apiKey } = await getLastFmCredentials();
+  if (!apiKey) return null;
+
+  const params: Record<string, string> = {
+    method: 'user.getTopTracks',
+    api_key: apiKey,
+    user: username,
+    period: 'overall',
+    limit: Math.min(1000, limit).toString(),
+    page: page.toString(),
+    format: 'json',
+  };
+
+  try {
+    const query = new URLSearchParams(params);
+    const res = await fetch(`${LASTFM_API_ROOT}?${query.toString()}`);
+    const text = await res.text();
+    if (!res.ok) {
+      console.warn(`Last.fm user.getTopTracks HTTP ${res.status}: ${text.slice(0, 100)}`);
+      return null;
+    }
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      console.warn(`Last.fm user.getTopTracks not JSON: ${text.slice(0, 100)}`);
+      return null;
+    }
+
+    const rawTracks = data?.toptracks?.track;
+    if (Array.isArray(rawTracks)) {
+      return rawTracks.map((t: any) => ({
+        title: t.name || '',
+        artist: t.artist?.name || '',
+        playCount: parseInt(t.playcount, 10) || 0,
+      }));
+    }
+  } catch (e) {
+    console.error('Failed to fetch user top tracks from Last.fm:', e);
+  }
+  return null;
+}
+

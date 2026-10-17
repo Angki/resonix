@@ -12,12 +12,19 @@ import {
   SkipForward,
   ChevronLeft,
   ChevronRight,
-  Eye,
-  EyeOff,
   Sliders,
   Sparkles,
+  Image as ImageIcon,
+  Eye,
+  EyeOff,
+  Music,
+  RefreshCw,
+  LayoutGrid,
+  ChevronDown,
 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVisualizerStore, VISUALIZER_MODES, VisualizerTheme } from '../store/visualizerStore';
+import { useUiStore } from '../store/uiStore';
 import { usePlayerStore } from '../store/playerStore';
 import { audioVisualizerService } from '../services/audioVisualizerService';
 import { api } from '../api/client';
@@ -35,6 +42,15 @@ const THEMES: Record<
     rgb: [number, number, number];
   }
 > = {
+  resonance: {
+    name: 'Resonance Harmonic',
+    primary: '#06b6d4',
+    secondary: '#6366f1',
+    accent: '#a5b4fc',
+    glow: 'rgba(6, 182, 212, 0.55)',
+    bgGlow: 'rgba(99, 102, 241, 0.22)',
+    rgb: [6, 182, 212],
+  },
   crimson: {
     name: 'Crimson Blood',
     primary: '#dc2626',
@@ -91,7 +107,7 @@ const THEMES: Record<
   },
 };
 
-// Particles for starfield and flame
+// Particles for starfield, flame, and ambient lyrics
 interface Particle {
   x: number;
   y: number;
@@ -135,7 +151,14 @@ export const VisualizerModal: React.FC = () => {
     toggleMute,
     currentTime,
     duration,
+    seek,
   } = usePlayerStore();
+
+  const { visualizerAmbientBg, setVisualizerAmbientBg } = useUiStore();
+  const ambientBgRef = useRef(visualizerAmbientBg);
+  ambientBgRef.current = visualizerAmbientBg;
+  const currentTrackRef = useRef(currentTrack);
+  currentTrackRef.current = currentTrack;
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -144,9 +167,89 @@ export const VisualizerModal: React.FC = () => {
   // Auto-hide controls overlay on mouse inactivity
   const [isHoveringControls, setIsHoveringControls] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [isModePickerOpen, setIsModePickerOpen] = useState(false);
   const hideTimerRef = useRef<any>(null);
 
-  // Visualizer states: peak hold bars, particle pool, matrix columns, vinyl rotation
+  // VU meter ballistic levels for Mode 12
+  const vuMeterRef = useRef<{ left: number; right: number }>({ left: 0, right: 0 });
+
+  useEffect(() => {
+    if (isOpen) {
+      setControlsVisible(true);
+    }
+  }, [isOpen]);
+
+  // Cached Image object for Album Artwork (used in Mode 6 Vinyl, Mode 10 Album Art Pulse, and Mode 12 Audiophile Stage)
+  const albumArtImgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const artworkSrc = currentTrack?.artworkId
+      ? api.getArtworkUrl(currentTrack.artworkId, 512)
+      : currentTrack?.id
+      ? api.getTrackArtworkUrl(currentTrack.id, 512)
+      : null;
+
+    if (!artworkSrc) {
+      albumArtImgRef.current = null;
+      return;
+    }
+
+    const img = new Image();
+    img.src = artworkSrc;
+    img.onload = () => {
+      albumArtImgRef.current = img;
+    };
+    img.onerror = () => {
+      if (currentTrack?.id && artworkSrc !== api.getTrackArtworkUrl(currentTrack.id, 512)) {
+        const fallback = new Image();
+        fallback.src = api.getTrackArtworkUrl(currentTrack.id, 512);
+        fallback.onload = () => {
+          albumArtImgRef.current = fallback;
+        };
+      } else {
+        albumArtImgRef.current = null;
+      }
+    };
+  }, [currentTrack?.artworkId, currentTrack?.id]);
+
+  // Query lyrics for Mode 11 (Live Synced Lyrics)
+  const queryClient = useQueryClient();
+  const { data: lyricsData, isLoading: lyricsLoading } = useQuery({
+    queryKey: ['visualizerLyrics', currentTrack?.id],
+    queryFn: () => (currentTrack?.id ? api.getTrackLyrics(currentTrack.id) : null),
+    enabled: isOpen && mode === 11 && !!currentTrack?.id,
+  });
+
+  const refetchLyricsMutation = useMutation({
+    mutationFn: () => (currentTrack?.id ? api.refetchTrackLyrics(currentTrack.id) : Promise.reject()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['visualizerLyrics', currentTrack?.id] });
+    },
+  });
+
+  const activeLyricsLineRef = useRef<HTMLDivElement | null>(null);
+
+  // Determine active lyrics line based on currentTime
+  let activeLyricsIndex = -1;
+  if (lyricsData?.isSynced && lyricsData.lines && lyricsData.lines.length > 0) {
+    for (let i = lyricsData.lines.length - 1; i >= 0; i--) {
+      if (currentTime >= lyricsData.lines[i].time - 0.25) {
+        activeLyricsIndex = i;
+        break;
+      }
+    }
+  }
+
+  // Smooth auto-scroll active lyrics line into vertical center
+  useEffect(() => {
+    if (activeLyricsIndex < 0 || !activeLyricsLineRef.current) return;
+    activeLyricsLineRef.current.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+    });
+  }, [activeLyricsIndex]);
+
+  // Visualizer states: peak hold bars, particle pool, matrix columns, vinyl rotation, shockwaves
   const peaksRef = useRef<number[]>([]);
   const peakDecayRef = useRef<number[]>([]);
   const particlesRef = useRef<Particle[]>([]);
@@ -238,7 +341,7 @@ export const VisualizerModal: React.FC = () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Initialize particles & matrix columns
+    // Initialize particles
     if (particlesRef.current.length === 0) {
       const pCount = 120;
       for (let i = 0; i < pCount; i++) {
@@ -257,17 +360,25 @@ export const VisualizerModal: React.FC = () => {
     }
 
     const render = () => {
-      const width = canvas.width / (Math.min(window.devicePixelRatio || 1, 2));
-      const height = canvas.height / (Math.min(window.devicePixelRatio || 1, 2));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const width = canvas.width / dpr;
+      const height = canvas.height / dpr;
 
       // Get real audio data from WebAudio service
       const freqData = audioVisualizerService.getFrequencyData();
       const timeData = audioVisualizerService.getTimeDomainData();
       const energy = audioVisualizerService.getEnergyLevels();
 
-      // Clear with dark ambient background
-      ctx.fillStyle = '#090a0d';
-      ctx.fillRect(0, 0, width, height);
+      // Background clearing with ambient cover art transparency support
+      const hasAmbientCover = ambientBgRef.current !== 'off' && !!currentTrackRef.current?.artworkId;
+      if (hasAmbientCover) {
+        ctx.clearRect(0, 0, width, height);
+        ctx.fillStyle = ambientBgRef.current === 'cover-blur' ? 'rgba(5, 6, 9, 0.45)' : 'rgba(5, 6, 9, 0.75)';
+        ctx.fillRect(0, 0, width, height);
+      } else {
+        ctx.fillStyle = '#090a0d';
+        ctx.fillRect(0, 0, width, height);
+      }
 
       // Radial background vignette / pulse
       const centerGrad = ctx.createRadialGradient(
@@ -280,7 +391,14 @@ export const VisualizerModal: React.FC = () => {
       );
       const bassPulse = energy.bass * sensitivity * 0.25;
       centerGrad.addColorStop(0, `rgba(${activeTheme.rgb.join(',')}, ${0.08 + bassPulse})`);
-      centerGrad.addColorStop(1, 'rgba(5, 5, 8, 0.98)');
+      centerGrad.addColorStop(
+        1,
+        hasAmbientCover
+          ? ambientBgRef.current === 'cover-blur'
+            ? 'rgba(5, 5, 8, 0.65)'
+            : 'rgba(5, 5, 8, 0.88)'
+          : 'rgba(5, 5, 8, 0.98)'
+      );
       ctx.fillStyle = centerGrad;
       ctx.fillRect(0, 0, width, height);
 
@@ -316,6 +434,15 @@ export const VisualizerModal: React.FC = () => {
         case 9:
           renderRetroSynthwave(ctx, width, height, energy);
           break;
+        case 10:
+          renderAlbumArtPulse(ctx, width, height, freqData, energy);
+          break;
+        case 11:
+          renderLyricsAmbientWave(ctx, width, height, timeData, energy);
+          break;
+        case 12:
+          renderAudiophileShowcase(ctx, width, height, freqData, energy);
+          break;
         default:
           renderFrequencyBars(ctx, width, height, freqData, energy);
       }
@@ -329,7 +456,7 @@ export const VisualizerModal: React.FC = () => {
       w: number,
       h: number,
       data: Uint8Array | null,
-      eng: { bass: number }
+      _eng: { bass: number }
     ) => {
       const barCount = 48;
       const margin = 3;
@@ -339,14 +466,12 @@ export const VisualizerModal: React.FC = () => {
       const baselineY = h * 0.76;
       const maxHeight = h * 0.52;
 
-      // Update peak arrays
       if (peaksRef.current.length !== barCount) {
         peaksRef.current = new Array(barCount).fill(0);
         peakDecayRef.current = new Array(barCount).fill(0);
       }
 
       for (let i = 0; i < barCount; i++) {
-        // Logarithmic/curved bin lookup for natural audio perception
         const binIndex = Math.min(
           Math.floor(Math.pow(i / barCount, 1.45) * 180),
           data ? data.length - 1 : 0
@@ -355,7 +480,6 @@ export const VisualizerModal: React.FC = () => {
         const normalized = Math.min(1, (rawVal / 255) * sensitivity);
         const barHeight = Math.max(4, normalized * maxHeight);
 
-        // Peak drop physics
         if (barHeight >= peaksRef.current[i]) {
           peaksRef.current[i] = barHeight;
           peakDecayRef.current[i] = 0;
@@ -367,7 +491,6 @@ export const VisualizerModal: React.FC = () => {
         const x = startX + i * (barWidth + margin);
         const y = baselineY - barHeight;
 
-        // Gradient for main bar
         const grad = c.createLinearGradient(0, baselineY, 0, y);
         grad.addColorStop(0, activeTheme.secondary);
         grad.addColorStop(0.7, activeTheme.primary);
@@ -378,19 +501,16 @@ export const VisualizerModal: React.FC = () => {
         c.roundRect(x, y, barWidth, barHeight, [2, 2, 0, 0]);
         c.fill();
 
-        // Floor reflection
         c.fillStyle = `rgba(${activeTheme.rgb.join(',')}, ${0.12 * normalized})`;
         c.beginPath();
         c.roundRect(x, baselineY + 3, barWidth, barHeight * 0.35, [0, 0, 2, 2]);
         c.fill();
 
-        // Peak cap with glow
         const peakY = baselineY - peaksRef.current[i] - 2;
         c.fillStyle = activeTheme.accent;
         c.fillRect(x, peakY, barWidth, 2);
       }
 
-      // Center baseline glow line
       c.strokeStyle = `rgba(${activeTheme.rgb.join(',')}, 0.3)`;
       c.lineWidth = 1;
       c.beginPath();
@@ -409,7 +529,6 @@ export const VisualizerModal: React.FC = () => {
       const centerY = h * 0.52;
       const sliceWidth = w / (data ? data.length : 256);
 
-      // Outer phosphor glow pass
       c.lineWidth = 4;
       c.strokeStyle = activeTheme.glow;
       c.beginPath();
@@ -423,7 +542,6 @@ export const VisualizerModal: React.FC = () => {
       }
       c.stroke();
 
-      // Sharp core beam pass
       c.lineWidth = 2;
       c.strokeStyle = activeTheme.accent;
       c.beginPath();
@@ -437,7 +555,6 @@ export const VisualizerModal: React.FC = () => {
       }
       c.stroke();
 
-      // Center crosshair graticule lines
       c.strokeStyle = 'rgba(255, 255, 255, 0.06)';
       c.lineWidth = 1;
       c.setLineDash([4, 6]);
@@ -464,7 +581,6 @@ export const VisualizerModal: React.FC = () => {
       const points = 72;
       rotationRef.current += 0.005;
 
-      // Inner glowing core
       const coreGrad = c.createRadialGradient(cx, cy, 2, cx, cy, baseRadius);
       coreGrad.addColorStop(0, activeTheme.accent);
       coreGrad.addColorStop(0.5, activeTheme.primary);
@@ -474,7 +590,6 @@ export const VisualizerModal: React.FC = () => {
       c.arc(cx, cy, baseRadius * 0.85, 0, Math.PI * 2);
       c.fill();
 
-      // Circular radiating spikes
       for (let i = 0; i < points; i++) {
         const angle = (i / points) * Math.PI * 2 + rotationRef.current;
         const bin = Math.min(Math.floor((i / points) * 140), data ? data.length - 1 : 0);
@@ -494,7 +609,6 @@ export const VisualizerModal: React.FC = () => {
         c.stroke();
       }
 
-      // Outer orbiting ring
       c.strokeStyle = activeTheme.glow;
       c.lineWidth = 1.5;
       c.beginPath();
@@ -511,7 +625,7 @@ export const VisualizerModal: React.FC = () => {
     ) => {
       const cx = w / 2;
       const cy = h * 0.52;
-      const speed = (2 + eng.bass * sensitivity * 16);
+      const speed = 2 + eng.bass * sensitivity * 16;
 
       particlesRef.current.forEach((p) => {
         p.z = (p.z || 800) - speed;
@@ -534,7 +648,6 @@ export const VisualizerModal: React.FC = () => {
           c.arc(sx, sy, size, 0, Math.PI * 2);
           c.fill();
 
-          // Warp streak line
           const prevK = 250 / (p.z + speed * 1.5);
           const px = p.x * prevK + cx;
           const py = p.y * prevK + cy;
@@ -627,12 +740,11 @@ export const VisualizerModal: React.FC = () => {
         c.fill();
       }
 
-      // Base volcanic ember bar
       c.fillStyle = `rgba(${activeTheme.rgb.join(',')}, ${0.4 + eng.bass * 0.4})`;
       c.fillRect(0, baseY - 2, w, 4);
     };
 
-    /* ---------------- MODE 6: VINYL TURNTABLE ---------------- */
+    /* ---------------- MODE 6: VINYL TURNTABLE (WITH ALBUM ARTWORK) ---------------- */
     const renderVinylTurntable = (
       c: CanvasRenderingContext2D,
       w: number,
@@ -679,16 +791,34 @@ export const VisualizerModal: React.FC = () => {
       c.arc(0, 0, radius, 0, Math.PI * 2);
       c.fill();
 
-      // Center Record Label (Center ring)
-      c.fillStyle = activeTheme.secondary;
-      c.beginPath();
-      c.arc(0, 0, radius * 0.35, 0, Math.PI * 2);
-      c.fill();
+      // Center Record Label: Draw Album Artwork if available!
+      const labelRadius = radius * 0.36;
+      if (albumArtImgRef.current && albumArtImgRef.current.complete) {
+        c.save();
+        c.beginPath();
+        c.arc(0, 0, labelRadius, 0, Math.PI * 2);
+        c.clip();
+        c.drawImage(albumArtImgRef.current, -labelRadius, -labelRadius, labelRadius * 2, labelRadius * 2);
+        c.restore();
 
-      c.fillStyle = activeTheme.primary;
-      c.beginPath();
-      c.arc(0, 0, radius * 0.28, 0, Math.PI * 2);
-      c.fill();
+        // Rim around artwork label
+        c.strokeStyle = activeTheme.primary;
+        c.lineWidth = 2;
+        c.beginPath();
+        c.arc(0, 0, labelRadius, 0, Math.PI * 2);
+        c.stroke();
+      } else {
+        // Fallback stylized label
+        c.fillStyle = activeTheme.secondary;
+        c.beginPath();
+        c.arc(0, 0, labelRadius, 0, Math.PI * 2);
+        c.fill();
+
+        c.fillStyle = activeTheme.primary;
+        c.beginPath();
+        c.arc(0, 0, labelRadius * 0.75, 0, Math.PI * 2);
+        c.fill();
+      }
 
       // Center Spindle Hole
       c.fillStyle = '#000000';
@@ -710,7 +840,6 @@ export const VisualizerModal: React.FC = () => {
       const cy = h * 0.52;
       const coreRadius = Math.min(w, h) * 0.14 + eng.bass * sensitivity * 35;
 
-      // Spawn shockwave ring on heavy bass kick
       if (eng.bass > 0.55 && Math.random() < 0.4) {
         shockwaveRingsRef.current.push({
           radius: coreRadius,
@@ -719,7 +848,6 @@ export const VisualizerModal: React.FC = () => {
         });
       }
 
-      // Update & render shockwave rings
       for (let i = shockwaveRingsRef.current.length - 1; i >= 0; i--) {
         const ring = shockwaveRingsRef.current[i];
         ring.radius += 5 + eng.bass * 8;
@@ -736,13 +864,11 @@ export const VisualizerModal: React.FC = () => {
         }
       }
 
-      // Pulsing Event Horizon Void Core
       c.fillStyle = '#000000';
       c.beginPath();
       c.arc(cx, cy, coreRadius, 0, Math.PI * 2);
       c.fill();
 
-      // Outer Corona Plasma Glow
       const corona = c.createRadialGradient(cx, cy, coreRadius * 0.8, cx, cy, coreRadius * 1.6);
       corona.addColorStop(0, activeTheme.accent);
       corona.addColorStop(0.5, activeTheme.primary);
@@ -759,7 +885,7 @@ export const VisualizerModal: React.FC = () => {
       w: number,
       h: number,
       data: Uint8Array | null,
-      eng: { bass: number }
+      _eng: { bass: number }
     ) => {
       const centerY = h * 0.52;
       const step = 4;
@@ -768,7 +894,6 @@ export const VisualizerModal: React.FC = () => {
       c.beginPath();
       c.moveTo(0, centerY);
 
-      // Top wave
       for (let i = 0; i < count; i++) {
         const bin = Math.min(Math.floor((i / count) * 128), data ? data.length - 1 : 0);
         const v = data ? (data[bin] - 128) / 128 : 0;
@@ -777,7 +902,6 @@ export const VisualizerModal: React.FC = () => {
         c.lineTo(x, y);
       }
 
-      // Bottom mirrored wave
       for (let i = count - 1; i >= 0; i--) {
         const bin = Math.min(Math.floor((i / count) * 128), data ? data.length - 1 : 0);
         const v = data ? (data[bin] - 128) / 128 : 0;
@@ -810,7 +934,6 @@ export const VisualizerModal: React.FC = () => {
       const cx = w / 2;
       gridOffsetRef.current = (gridOffsetRef.current + (1.5 + eng.bass * sensitivity * 8)) % 30;
 
-      // Synthwave Sunset Sun
       const sunRadius = Math.min(w, h) * 0.18;
       const sunGrad = c.createLinearGradient(0, horizonY - sunRadius * 2, 0, horizonY);
       sunGrad.addColorStop(0, '#fef08a');
@@ -822,13 +945,11 @@ export const VisualizerModal: React.FC = () => {
       c.arc(cx, horizonY, sunRadius, Math.PI, 0, false);
       c.fill();
 
-      // Horizontal blinds cuts through sun
       c.fillStyle = '#090a0d';
       for (let y = horizonY - sunRadius + 15; y < horizonY; y += 12) {
         c.fillRect(cx - sunRadius, y, sunRadius * 2, 3);
       }
 
-      // Horizon separator beam
       c.strokeStyle = activeTheme.accent;
       c.lineWidth = 2;
       c.beginPath();
@@ -836,11 +957,9 @@ export const VisualizerModal: React.FC = () => {
       c.lineTo(w, horizonY);
       c.stroke();
 
-      // 3D Perspective Grid
       c.strokeStyle = `rgba(${activeTheme.rgb.join(',')}, 0.45)`;
       c.lineWidth = 1;
 
-      // Vanishing point perspective lines
       const lineCount = 20;
       for (let i = 0; i <= lineCount; i++) {
         const bottomX = (w / lineCount) * i;
@@ -850,9 +969,8 @@ export const VisualizerModal: React.FC = () => {
         c.stroke();
       }
 
-      // Moving horizontal grid lines
       for (let y = horizonY + 6; y < h; y += 6 + Math.pow((y - horizonY) / 14, 1.4)) {
-        const adjustedY = y + (gridOffsetRef.current * ((y - horizonY) / h));
+        const adjustedY = y + gridOffsetRef.current * ((y - horizonY) / h);
         if (adjustedY <= h) {
           c.beginPath();
           c.moveTo(0, adjustedY);
@@ -860,6 +978,415 @@ export const VisualizerModal: React.FC = () => {
           c.stroke();
         }
       }
+    };
+
+    /* ---------------- MODE 10: ALBUM ART PULSE (COVER ART VISUALIZER) ---------------- */
+    const renderAlbumArtPulse = (
+      c: CanvasRenderingContext2D,
+      w: number,
+      h: number,
+      data: Uint8Array | null,
+      eng: { bass: number; overall: number }
+    ) => {
+      const cx = w / 2;
+      const cy = h * 0.44;
+      const bassBump = eng.bass * sensitivity * 22;
+      const boxSize = Math.min(w, h) * 0.36 + bassBump;
+      const radius = (boxSize / 2) * 1.34;
+
+      // 1. Bass shockwaves
+      if (eng.bass > 0.58 && Math.random() < 0.3) {
+        shockwaveRingsRef.current.push({
+          radius: boxSize * 0.6,
+          maxRadius: Math.min(w, h) * 0.78,
+          alpha: 0.85,
+        });
+      }
+
+      for (let i = shockwaveRingsRef.current.length - 1; i >= 0; i--) {
+        const ring = shockwaveRingsRef.current[i];
+        ring.radius += 4 + eng.bass * 6;
+        ring.alpha -= 0.025;
+
+        c.strokeStyle = `rgba(${activeTheme.rgb.join(',')}, ${ring.alpha})`;
+        c.lineWidth = 2.5;
+        c.beginPath();
+        c.arc(cx, cy, ring.radius, 0, Math.PI * 2);
+        c.stroke();
+
+        if (ring.alpha <= 0 || ring.radius >= ring.maxRadius) {
+          shockwaveRingsRef.current.splice(i, 1);
+        }
+      }
+
+      // 2. Circular 360° frequency halo around cover art
+      const spikeCount = 64;
+      rotationRef.current += 0.003;
+      for (let i = 0; i < spikeCount; i++) {
+        const angle = (i / spikeCount) * Math.PI * 2 + rotationRef.current;
+        const bin = Math.min(Math.floor((i / spikeCount) * 120), data ? data.length - 1 : 0);
+        const val = data ? (data[bin] / 255) * sensitivity : 0.05;
+        const spikeLength = Math.max(8, val * (Math.min(w, h) * 0.16));
+
+        const x1 = cx + Math.cos(angle) * radius;
+        const y1 = cy + Math.sin(angle) * radius;
+        const x2 = cx + Math.cos(angle) * (radius + spikeLength);
+        const y2 = cy + Math.sin(angle) * (radius + spikeLength);
+
+        c.strokeStyle = val > 0.6 ? activeTheme.accent : activeTheme.primary;
+        c.lineWidth = Math.max(2, (w / spikeCount) * 0.3);
+        c.beginPath();
+        c.moveTo(x1, y1);
+        c.lineTo(x2, y2);
+        c.stroke();
+      }
+
+      // Outer glow circle
+      c.strokeStyle = activeTheme.glow;
+      c.lineWidth = 1.5;
+      c.beginPath();
+      c.arc(cx, cy, radius, 0, Math.PI * 2);
+      c.stroke();
+
+      // 3. Draw Album Artwork or Fallback Box
+      const half = boxSize / 2;
+      const cornerRadius = 16;
+
+      // Glow backing
+      c.save();
+      c.shadowColor = activeTheme.primary;
+      c.shadowBlur = 25 + bassBump * 1.5;
+      c.strokeStyle = activeTheme.accent;
+      c.lineWidth = 2.5;
+      c.beginPath();
+      c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+      c.stroke();
+      c.restore();
+
+      if (albumArtImgRef.current && albumArtImgRef.current.complete) {
+        c.save();
+        c.beginPath();
+        c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+        c.clip();
+        c.drawImage(albumArtImgRef.current, cx - half, cy - half, boxSize, boxSize);
+        c.restore();
+
+        // 4. Floor reflection
+        const reflHeight = boxSize * 0.38;
+        c.save();
+        c.beginPath();
+        c.roundRect(cx - half, cy + half + 8, boxSize, reflHeight, [0, 0, cornerRadius, cornerRadius]);
+        c.clip();
+
+        c.translate(cx, cy + half + 8 + reflHeight);
+        c.scale(1, -1);
+        c.drawImage(albumArtImgRef.current, -half, 0, boxSize, boxSize);
+
+        c.scale(1, -1);
+        c.translate(-cx, -(cy + half + 8 + reflHeight));
+        const reflGrad = c.createLinearGradient(0, cy + half + 8, 0, cy + half + 8 + reflHeight);
+        reflGrad.addColorStop(0, 'rgba(9, 10, 13, 0.45)');
+        reflGrad.addColorStop(1, 'rgba(9, 10, 13, 0.98)');
+        c.fillStyle = reflGrad;
+        c.fillRect(cx - half - 2, cy + half + 6, boxSize + 4, reflHeight + 4);
+        c.restore();
+      } else {
+        // Fallback stylized box
+        c.fillStyle = '#14171f';
+        c.beginPath();
+        c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+        c.fill();
+
+        c.fillStyle = activeTheme.accent;
+        c.font = 'bold 15px sans-serif';
+        c.textAlign = 'center';
+        c.fillText(currentTrackRef.current?.title || 'Resonix', cx, cy - 8);
+        c.fillStyle = '#71717a';
+        c.font = '12px sans-serif';
+        c.fillText(currentTrackRef.current?.artistName || 'Playing Music', cx, cy + 16);
+      }
+    };
+
+    /* ---------------- MODE 11: LIVE SYNCED LYRICS AMBIENT CANVAS ---------------- */
+    const renderLyricsAmbientWave = (
+      c: CanvasRenderingContext2D,
+      w: number,
+      h: number,
+      timeData: Uint8Array | null,
+      eng: { bass: number }
+    ) => {
+      // Gentle particle drift in background
+      particlesRef.current.forEach((p) => {
+        p.x += p.vx * 0.6;
+        p.y += p.vy * 0.6;
+        if (p.x < 0) p.x = w;
+        if (p.x > w) p.x = 0;
+        if (p.y < 0) p.y = h;
+        if (p.y > h) p.y = 0;
+
+        c.fillStyle = `rgba(${activeTheme.rgb.join(',')}, ${p.alpha * 0.25})`;
+        c.beginPath();
+        c.arc(p.x, p.y, p.size * (1 + eng.bass * 0.4), 0, Math.PI * 2);
+        c.fill();
+      });
+
+      // Harmonic waveform flowing at bottom of the canvas
+      const baseY = h * 0.88;
+      const count = 64;
+      const step = w / count;
+
+      c.beginPath();
+      c.moveTo(0, baseY);
+      for (let i = 0; i <= count; i++) {
+        const bin = Math.min(Math.floor((i / count) * 128), timeData ? timeData.length - 1 : 0);
+        const v = timeData ? (timeData[bin] - 128) / 128 : Math.sin(i * 0.2) * 0.1;
+        const x = i * step;
+        const y = baseY + v * 35 * sensitivity;
+        c.lineTo(x, y);
+      }
+      c.lineTo(w, h);
+      c.lineTo(0, h);
+      c.closePath();
+
+      const grad = c.createLinearGradient(0, baseY - 40, 0, h);
+      grad.addColorStop(0, `rgba(${activeTheme.rgb.join(',')}, 0.25)`);
+      grad.addColorStop(1, 'transparent');
+      c.fillStyle = grad;
+      c.fill();
+    };
+
+    /* ---------------- MODE 12: AUDIOPHILE STAGE & DUAL VU METERS ---------------- */
+    const renderAudiophileShowcase = (
+      c: CanvasRenderingContext2D,
+      w: number,
+      h: number,
+      freqData: Uint8Array | null,
+      eng: { bass: number; mid: number; treble: number; overall: number }
+    ) => {
+      const cx = w / 2;
+      const cy = h * 0.40;
+      const boxSize = Math.min(w * 0.32, h * 0.40, 320);
+      const half = boxSize / 2;
+      const cornerRadius = 14;
+
+      // 1. Dynamic background frequency halo behind cover art
+      const haloRays = 48;
+      rotationRef.current += 0.004;
+      for (let i = 0; i < haloRays; i++) {
+        const angle = (i / haloRays) * Math.PI * 2 + rotationRef.current * 0.4;
+        const bin = Math.min(Math.floor((i / haloRays) * 100), freqData ? freqData.length - 1 : 0);
+        const val = freqData ? (freqData[bin] / 255) * sensitivity : 0.05;
+        const rayLen = val * (boxSize * 0.35);
+
+        const x1 = cx + Math.cos(angle) * (half * 1.05);
+        const y1 = cy + Math.sin(angle) * (half * 1.05);
+        const x2 = cx + Math.cos(angle) * (half * 1.05 + rayLen);
+        const y2 = cy + Math.sin(angle) * (half * 1.05 + rayLen);
+
+        c.strokeStyle = val > 0.6 ? activeTheme.accent : `rgba(${activeTheme.rgb.join(',')}, 0.5)`;
+        c.lineWidth = 2.5;
+        c.beginPath();
+        c.moveTo(x1, y1);
+        c.lineTo(x2, y2);
+        c.stroke();
+      }
+
+      // 2. Large Central Album Cover
+      c.save();
+      c.shadowColor = activeTheme.primary;
+      c.shadowBlur = 30 + eng.bass * 25;
+      c.strokeStyle = `rgba(${activeTheme.rgb.join(',')}, 0.8)`;
+      c.lineWidth = 2;
+      c.beginPath();
+      c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+      c.stroke();
+      c.restore();
+
+      if (albumArtImgRef.current && albumArtImgRef.current.complete) {
+        c.save();
+        c.beginPath();
+        c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+        c.clip();
+        c.drawImage(albumArtImgRef.current, cx - half, cy - half, boxSize, boxSize);
+        c.restore();
+
+        // 3. Mirror glass reflection below artwork
+        const reflHeight = boxSize * 0.30;
+        c.save();
+        c.beginPath();
+        c.roundRect(cx - half, cy + half + 6, boxSize, reflHeight, [0, 0, cornerRadius, cornerRadius]);
+        c.clip();
+        c.translate(cx, cy + half + 6 + reflHeight);
+        c.scale(1, -1);
+        c.drawImage(albumArtImgRef.current, -half, 0, boxSize, boxSize);
+        c.scale(1, -1);
+        c.translate(-cx, -(cy + half + 6 + reflHeight));
+
+        const reflGrad = c.createLinearGradient(0, cy + half + 6, 0, cy + half + 6 + reflHeight);
+        reflGrad.addColorStop(0, 'rgba(8, 9, 12, 0.45)');
+        reflGrad.addColorStop(1, 'rgba(8, 9, 12, 0.98)');
+        c.fillStyle = reflGrad;
+        c.fillRect(cx - half - 2, cy + half + 4, boxSize + 4, reflHeight + 4);
+        c.restore();
+      } else {
+        c.fillStyle = '#11131a';
+        c.beginPath();
+        c.roundRect(cx - half, cy - half, boxSize, boxSize, cornerRadius);
+        c.fill();
+
+        c.fillStyle = activeTheme.accent;
+        c.font = 'bold 16px sans-serif';
+        c.textAlign = 'center';
+        c.fillText(currentTrackRef.current?.title || 'Resonix', cx, cy - 8);
+        c.fillStyle = '#9ca3af';
+        c.font = '12px sans-serif';
+        c.fillText(currentTrackRef.current?.artistName || 'Hi-Fi Audio', cx, cy + 16);
+      }
+
+      // 4. Vintage Analog VU Meters (Twin Dial Units)
+      const targetL = Math.min(1, (eng.bass * 1.3 + eng.mid * 0.5) * sensitivity);
+      const targetR = Math.min(1, (eng.treble * 1.2 + eng.overall * 0.7) * sensitivity);
+      vuMeterRef.current.left += (targetL - vuMeterRef.current.left) * 0.22;
+      vuMeterRef.current.right += (targetR - vuMeterRef.current.right) * 0.22;
+
+      const vuWidth = Math.min(w * 0.22, 175);
+      const vuHeight = vuWidth * 0.65;
+      const vuY = cy - vuHeight / 2;
+
+      const drawVuMeter = (meterX: number, meterY: number, label: string, value: number) => {
+        c.save();
+        // Bezel frame
+        c.fillStyle = '#0d0f14';
+        c.strokeStyle = '#27272a';
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.roundRect(meterX, meterY, vuWidth, vuHeight, 8);
+        c.fill();
+        c.stroke();
+
+        // Inner warm amber dial face
+        const innerPad = 5;
+        const faceX = meterX + innerPad;
+        const faceY = meterY + innerPad;
+        const faceW = vuWidth - innerPad * 2;
+        const faceH = vuHeight - innerPad * 2;
+
+        const dialGrad = c.createLinearGradient(faceX, faceY, faceX, faceY + faceH);
+        dialGrad.addColorStop(0, '#fef3c7');
+        dialGrad.addColorStop(0.8, '#fde68a');
+        dialGrad.addColorStop(1, '#f59e0b');
+        c.fillStyle = dialGrad;
+        c.beginPath();
+        c.roundRect(faceX, faceY, faceW, faceH, 5);
+        c.fill();
+
+        // Arc scale
+        const pivotX = faceX + faceW / 2;
+        const pivotY = faceY + faceH * 1.15;
+        const arcRadius = faceH * 0.95;
+
+        // Normal zone (Black) & Overload zone (Red)
+        c.lineWidth = 2;
+        c.strokeStyle = '#18181b';
+        c.beginPath();
+        c.arc(pivotX, pivotY, arcRadius, -Math.PI * 0.75, -Math.PI * 0.35, false);
+        c.stroke();
+
+        c.strokeStyle = '#dc2626';
+        c.beginPath();
+        c.arc(pivotX, pivotY, arcRadius, -Math.PI * 0.35, -Math.PI * 0.25, false);
+        c.stroke();
+
+        // dB Tick marks
+        c.fillStyle = '#18181b';
+        c.font = 'bold 7px sans-serif';
+        c.textAlign = 'center';
+        const ticks = [
+          { val: 0.0, label: '-20' },
+          { val: 0.3, label: '-10' },
+          { val: 0.5, label: '-5' },
+          { val: 0.75, label: '0' },
+          { val: 1.0, label: '+3' },
+        ];
+        ticks.forEach((t) => {
+          const tAngle = -Math.PI * 0.75 + t.val * (Math.PI * 0.5);
+          const tx1 = pivotX + Math.cos(tAngle) * arcRadius;
+          const ty1 = pivotY + Math.sin(tAngle) * arcRadius;
+          const tx2 = pivotX + Math.cos(tAngle) * (arcRadius - 4);
+          const ty2 = pivotY + Math.sin(tAngle) * (arcRadius - 4);
+          c.strokeStyle = t.val > 0.75 ? '#dc2626' : '#18181b';
+          c.beginPath();
+          c.moveTo(tx1, ty1);
+          c.lineTo(tx2, ty2);
+          c.stroke();
+          c.fillText(t.label, tx2, ty2 - 2);
+        });
+
+        // Label: "LEFT CH" or "RIGHT CH"
+        c.fillStyle = '#451a03';
+        c.font = 'bold 8px sans-serif';
+        c.fillText(`VU • ${label}`, pivotX, faceY + faceH * 0.75);
+
+        // Analog Needle with ballistic angle
+        const needleAngle = -Math.PI * 0.75 + Math.max(0, Math.min(1, value)) * (Math.PI * 0.5);
+        const nx = pivotX + Math.cos(needleAngle) * (arcRadius + 2);
+        const ny = pivotY + Math.sin(needleAngle) * (arcRadius + 2);
+
+        c.strokeStyle = '#991b1b';
+        c.lineWidth = 1.5;
+        c.beginPath();
+        c.moveTo(pivotX, pivotY);
+        c.lineTo(nx, ny);
+        c.stroke();
+
+        // Pivot cap
+        c.fillStyle = '#18181b';
+        c.beginPath();
+        c.arc(pivotX, pivotY, 3, 0, Math.PI * 2);
+        c.fill();
+
+        c.restore();
+      };
+
+      // Draw Left & Right VU Meters flanking the cover art on wider screens
+      if (w > 640) {
+        drawVuMeter(cx - half - vuWidth - 24, vuY, 'CH 1 (L)', vuMeterRef.current.left);
+        drawVuMeter(cx + half + 24, vuY, 'CH 2 (R)', vuMeterRef.current.right);
+      } else {
+        const mY = cy + half + 18;
+        drawVuMeter(cx - vuWidth - 6, mY, 'CH 1 (L)', vuMeterRef.current.left);
+        drawVuMeter(cx + 6, mY, 'CH 2 (R)', vuMeterRef.current.right);
+      }
+
+      // 5. Audiophile Metadata Typography Banner below
+      const infoY = Math.min(h * 0.76, cy + half + (w > 640 ? 50 : vuHeight + 35));
+      c.save();
+      c.textAlign = 'center';
+
+      // Title
+      c.fillStyle = '#ffffff';
+      c.font = 'bold 18px sans-serif';
+      const titleText = currentTrackRef.current?.title || 'Unknown Title';
+      c.fillText(titleText, cx, infoY);
+
+      // Artist & Album
+      c.fillStyle = activeTheme.accent;
+      c.font = '13px sans-serif';
+      const subText = `${currentTrackRef.current?.artistName || 'Unknown Artist'} — ${currentTrackRef.current?.albumTitle || 'Unknown Album'}`;
+      c.fillText(subText, cx, infoY + 22);
+
+      // Hi-Fi Audio Spec Pill: Codec, sample rate, bit depth
+      const track = currentTrackRef.current;
+      const isLossless = track?.isLossless;
+      const codecStr = (track?.codec || (isLossless ? 'FLAC' : 'MP3')).toUpperCase();
+      const srStr = track?.sampleRate ? `${(track.sampleRate / 1000).toFixed(1)} kHz` : '44.1 kHz';
+      const bdStr = track?.bitDepth ? `${track.bitDepth}-bit` : isLossless ? '16-bit' : '320 kbps';
+      const specPill = `${isLossless ? '✦ LOSSLESS • ' : ''}${codecStr} • ${bdStr} • ${srStr}`;
+
+      c.fillStyle = isLossless ? '#fef08a' : '#a1a1aa';
+      c.font = 'bold 10px monospace';
+      c.fillText(specPill, cx, infoY + 42);
+      c.restore();
     };
 
     render();
@@ -887,33 +1414,182 @@ export const VisualizerModal: React.FC = () => {
         isFullscreen ? 'w-screen h-screen' : ''
       }`}
     >
-      {/* Visualizer Canvas */}
+      {/* Ambient Cover Art Background */}
+      {visualizerAmbientBg !== 'off' && currentTrack?.artworkId && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden z-0 select-none">
+          <img
+            src={api.getArtworkUrl(currentTrack.artworkId, 512)}
+            alt=""
+            className={`w-full h-full object-cover transition-all duration-1000 scale-125 select-none ${
+              visualizerAmbientBg === 'cover-blur'
+                ? 'opacity-40 blur-3xl saturate-150'
+                : 'opacity-20 blur-3xl saturate-125'
+            }`}
+          />
+          <div className="absolute inset-0 bg-radial from-transparent via-black/40 to-black/85" />
+        </div>
+      )}
+
+      {/* Visualizer Canvas (Placed at z-0 so it NEVER blocks overlay controls) */}
       <canvas
         ref={canvasRef}
-        onClick={toggleOverlay}
-        className="w-full h-full flex-1 cursor-pointer block"
+        className="absolute inset-0 z-0 w-full h-full block"
       />
 
-      {/* Floating Header Controls */}
+      {/* Mode 11: Live Synced Lyrics Fullscreen Overlay (Placed at z-20) */}
+      {mode === 11 && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              toggleOverlay();
+            }
+          }}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center pointer-events-auto overflow-hidden px-4 pt-20 pb-28"
+        >
+          {lyricsLoading ? (
+            <div className="flex flex-col items-center space-y-3 text-zinc-400">
+              <div className="w-8 h-8 border-2 border-crimson-500 border-t-transparent rounded-full animate-spin" />
+              <span className="font-mono text-xs">Memuat lirik...</span>
+            </div>
+          ) : lyricsData?.isSynced && lyricsData.lines && lyricsData.lines.length > 0 ? (
+            <div className="w-full max-w-3xl h-full overflow-y-auto no-scrollbar flex flex-col items-center py-32 space-y-7 text-center select-none">
+              {lyricsData.lines.map((line, idx) => {
+                const isActive = idx === activeLyricsIndex;
+                const isNear = Math.abs(idx - activeLyricsIndex) <= 2;
+
+                return (
+                  <div
+                    key={`${line.time}-${idx}`}
+                    ref={isActive ? activeLyricsLineRef : null}
+                    onClick={() => seek(line.time)}
+                    style={{
+                      color: isActive ? activeTheme.accent : undefined,
+                      textShadow: isActive ? `0 0 25px ${activeTheme.glow}` : undefined,
+                    }}
+                    className={`transition-all duration-300 font-sans cursor-pointer px-4 py-1.5 rounded-xl ${
+                      isActive
+                        ? 'text-2xl sm:text-4xl font-extrabold scale-105 tracking-tight'
+                        : isNear
+                        ? 'text-base sm:text-xl font-medium text-zinc-300 hover:text-white opacity-60 hover:opacity-100'
+                        : 'text-sm sm:text-base text-zinc-500 hover:text-zinc-300 opacity-25 hover:opacity-75'
+                    }`}
+                  >
+                    {line.text || '♪'}
+                  </div>
+                );
+              })}
+            </div>
+          ) : lyricsData?.plainText ? (
+            <div className="w-full max-w-2xl max-h-[70vh] overflow-y-auto no-scrollbar text-center text-zinc-200 text-sm sm:text-base leading-relaxed px-6 whitespace-pre-line font-sans scrollbar-thin scrollbar-thumb-charcoal-700">
+              {lyricsData.plainText}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center text-center space-y-4 max-w-md p-6 rounded-2xl bg-charcoal-900/60 border border-charcoal-800 backdrop-blur-md">
+              <div className="w-24 h-24 rounded-xl overflow-hidden shadow-2xl border border-charcoal-700/80 bg-charcoal-950">
+                {currentTrack?.artworkId ? (
+                  <img
+                    src={api.getArtworkUrl(currentTrack.artworkId, 256)}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-zinc-600">
+                    <Music size={32} />
+                  </div>
+                )}
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-white truncate max-w-xs">{currentTrack?.title || 'No Track'}</h4>
+                <p className="text-xs text-zinc-400 truncate max-w-xs">{currentTrack?.artistName || ''}</p>
+              </div>
+              <p className="text-xs text-zinc-500 font-mono">Belum ada lirik untuk lagu ini</p>
+              <button
+                onClick={() => refetchLyricsMutation.mutate()}
+                disabled={refetchLyricsMutation.isPending}
+                className="px-3.5 py-1.5 bg-charcoal-800 hover:bg-crimson-800 text-zinc-200 hover:text-white rounded-lg border border-charcoal-700 text-xs font-medium transition cursor-pointer flex items-center space-x-1.5"
+              >
+                <RefreshCw size={12} className={refetchLyricsMutation.isPending ? 'animate-spin text-crimson-400' : ''} />
+                <span>{refetchLyricsMutation.isPending ? 'Mencari...' : 'Cari Lirik di LRCLIB'}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Floating Header Controls (Placed at z-30 with e.stopPropagation() so buttons are ALWAYS clickable) */}
       <div
         onMouseEnter={() => setIsHoveringControls(true)}
         onMouseLeave={() => setIsHoveringControls(false)}
-        className={`absolute top-0 left-0 right-0 p-3 sm:p-4 bg-gradient-to-b from-black/85 via-black/50 to-transparent transition-opacity duration-300 pointer-events-auto flex items-center justify-between ${
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute top-0 left-0 right-0 z-30 p-3 sm:p-4 bg-gradient-to-b from-black/85 via-black/50 to-transparent transition-opacity duration-300 pointer-events-auto flex items-center justify-between ${
           controlsVisible && showOverlay ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
         {/* Left: Mode Title & Switcher */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          <div className="flex items-center space-x-1.5 bg-charcoal-900/90 border border-charcoal-700/80 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-md">
-            <Waves size={16} className="text-crimson-500 animate-pulse" />
-            <div className="flex flex-col">
-              <span className="font-semibold text-zinc-100 text-xs tracking-wide">
-                {activeModeDef.name}
-              </span>
-              <span className="font-mono text-[9px] text-zinc-400">
-                {activeModeDef.tagline}
-              </span>
-            </div>
+          {/* Mode Title Button & Dropdown Trigger */}
+          <div className="relative">
+            <button
+              onClick={() => setIsModePickerOpen(!isModePickerOpen)}
+              className="flex items-center space-x-2 bg-charcoal-900/90 hover:bg-charcoal-850 border border-charcoal-700/80 rounded-lg px-2.5 py-1.5 shadow-lg backdrop-blur-md transition cursor-pointer text-left"
+            >
+              <Waves size={16} className="text-crimson-500 animate-pulse shrink-0" />
+              <div className="flex flex-col">
+                <span className="font-semibold text-zinc-100 text-xs tracking-wide flex items-center gap-1">
+                  {activeModeDef.name}
+                  <ChevronDown size={12} className="text-zinc-400" />
+                </span>
+                <span className="font-mono text-[9px] text-zinc-400 truncate max-w-[130px] sm:max-w-[180px]">
+                  {activeModeDef.tagline}
+                </span>
+              </div>
+            </button>
+
+            {/* Mode Picker Dropdown Menu */}
+            {isModePickerOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsModePickerOpen(false)}
+                />
+                <div className="absolute left-0 top-full mt-2 w-72 sm:w-80 bg-charcoal-900 border border-charcoal-700 rounded-xl p-2 shadow-2xl backdrop-blur-xl z-50 text-xs max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-charcoal-700 space-y-1">
+                  <div className="px-2 py-1 text-[10px] font-mono uppercase text-zinc-400 tracking-wider font-semibold border-b border-charcoal-800 flex justify-between items-center">
+                    <span>Pilih Preset Visualisasi</span>
+                    <span className="text-crimson-400 font-bold">{mode + 1} / {VISUALIZER_MODES.length}</span>
+                  </div>
+
+                  {VISUALIZER_MODES.map((m) => {
+                    const isSelected = mode === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => {
+                          setMode(m.id);
+                          setIsModePickerOpen(false);
+                        }}
+                        className={`w-full text-left p-2 rounded-lg transition flex items-start space-x-2.5 cursor-pointer ${
+                          isSelected
+                            ? 'bg-crimson-950/70 text-white border border-crimson-700/70 shadow-xs ring-1 ring-crimson-500/30'
+                            : 'text-zinc-300 hover:text-white hover:bg-charcoal-800'
+                        }`}
+                      >
+                        <span className="font-mono text-[11px] font-bold text-crimson-400 mt-0.5 w-5 shrink-0">
+                          {m.id + 1}.
+                        </span>
+                        <div className="flex flex-col flex-1 truncate">
+                          <span className="font-medium text-xs truncate flex items-center gap-1.5">
+                            {m.id === 10 || m.id === 12 ? '🖼️ ' : m.id === 6 ? '💿 ' : m.id === 11 ? '🎤 ' : '📊 '}
+                            {m.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-zinc-400 truncate">{m.tagline}</span>
+                          <span className="text-[9px] text-zinc-500 line-clamp-1">{m.description}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Mode Prev / Next buttons */}
@@ -921,7 +1597,7 @@ export const VisualizerModal: React.FC = () => {
             <button
               onClick={prevMode}
               title="Previous Mode (Left Arrow)"
-              className="p-1 text-zinc-400 hover:text-white hover:bg-charcoal-800 rounded transition"
+              className="p-1 text-zinc-400 hover:text-white hover:bg-charcoal-800 rounded transition cursor-pointer"
             >
               <ChevronLeft size={16} />
             </button>
@@ -931,28 +1607,31 @@ export const VisualizerModal: React.FC = () => {
             <button
               onClick={nextMode}
               title="Next Mode (Right Arrow)"
-              className="p-1 text-zinc-400 hover:text-white hover:bg-charcoal-800 rounded transition"
+              className="p-1 text-zinc-400 hover:text-white hover:bg-charcoal-800 rounded transition cursor-pointer"
             >
               <ChevronRight size={16} />
             </button>
           </div>
         </div>
 
-        {/* Center: Mode Quick Selector Bar (hidden on small mobile) */}
-        <div className="hidden lg:flex items-center gap-1 bg-charcoal-900/80 border border-charcoal-700/80 rounded-lg p-1 backdrop-blur-md max-w-xl overflow-x-auto no-scrollbar">
-          {VISUALIZER_MODES.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setMode(m.id)}
-              className={`px-2 py-0.5 rounded text-[10px] font-mono transition whitespace-nowrap ${
-                mode === m.id
-                  ? 'bg-crimson-700 text-white font-bold shadow-xs'
-                  : 'text-zinc-400 hover:text-white hover:bg-charcoal-800'
-              }`}
-            >
-              {m.id + 1}. {m.name.split(' ')[0]}
-            </button>
-          ))}
+        {/* Center: Mode Quick Selector Bar */}
+        <div className="hidden md:flex items-center gap-1 bg-charcoal-900/80 border border-charcoal-700/80 rounded-lg p-1 backdrop-blur-md max-w-xl overflow-x-auto no-scrollbar">
+          {VISUALIZER_MODES.map((m) => {
+            const shortLabel = m.id === 10 ? 'Cover Pulse' : m.id === 12 ? 'Cover VU' : m.id === 11 ? 'Lyrics' : m.name.split(' ')[0];
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className={`px-2 py-0.5 rounded text-[10px] font-mono transition whitespace-nowrap cursor-pointer ${
+                  mode === m.id
+                    ? 'bg-crimson-700 text-white font-bold shadow-xs'
+                    : 'text-zinc-400 hover:text-white hover:bg-charcoal-800'
+                }`}
+              >
+                {m.id + 1}. {shortLabel}
+              </button>
+            );
+          })}
         </div>
 
         {/* Right: Theme, Sensitivity & Controls */}
@@ -965,7 +1644,7 @@ export const VisualizerModal: React.FC = () => {
                 onClick={() => setTheme(tKey)}
                 title={THEMES[tKey].name}
                 style={{ backgroundColor: THEMES[tKey].primary }}
-                className={`w-4.5 h-4.5 rounded-full transition transform hover:scale-110 ${
+                className={`w-4.5 h-4.5 rounded-full transition transform hover:scale-110 cursor-pointer ${
                   theme === tKey ? 'ring-2 ring-white scale-110 shadow-sm' : 'opacity-60'
                 }`}
               />
@@ -990,11 +1669,57 @@ export const VisualizerModal: React.FC = () => {
             </span>
           </div>
 
+          {/* Cover Art Ambient Background Toggle */}
+          <button
+            onClick={() => {
+              const next =
+                visualizerAmbientBg === 'cover-blur'
+                  ? 'dim'
+                  : visualizerAmbientBg === 'dim'
+                  ? 'off'
+                  : 'cover-blur';
+              setVisualizerAmbientBg(next);
+            }}
+            title={`Ambient Cover Art: ${
+              visualizerAmbientBg === 'cover-blur'
+                ? 'Vibrant Bloom'
+                : visualizerAmbientBg === 'dim'
+                ? 'Subtle Dim'
+                : 'Off'
+            }`}
+            className={`hidden md:flex items-center space-x-1.5 px-2 py-1 rounded-lg border text-[11px] font-mono transition backdrop-blur-md cursor-pointer ${
+              visualizerAmbientBg !== 'off'
+                ? 'bg-charcoal-900/90 border-crimson-600/70 text-zinc-100 shadow-xs'
+                : 'bg-charcoal-900/80 border-charcoal-700/80 text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <ImageIcon
+              size={13}
+              className={visualizerAmbientBg !== 'off' ? 'text-crimson-400' : 'text-zinc-500'}
+            />
+            <span className="text-[10px]">
+              {visualizerAmbientBg === 'cover-blur'
+                ? 'Cover: Bloom'
+                : visualizerAmbientBg === 'dim'
+                ? 'Cover: Dim'
+                : 'Cover: Off'}
+            </span>
+          </button>
+
+          {/* Toggle Controls Overlay (H) */}
+          <button
+            onClick={toggleOverlay}
+            title={showOverlay ? 'Sembunyikan Menu (H)' : 'Tampilkan Menu (H)'}
+            className="p-1.5 bg-charcoal-900/80 border border-charcoal-700/80 text-zinc-300 hover:text-white hover:bg-charcoal-800 rounded-lg transition backdrop-blur-md cursor-pointer"
+          >
+            {showOverlay ? <Eye size={16} /> : <EyeOff size={16} />}
+          </button>
+
           {/* Toggle Fullscreen */}
           <button
             onClick={toggleFullscreenNative}
             title="Toggle Fullscreen (F)"
-            className="p-1.5 bg-charcoal-900/80 border border-charcoal-700/80 text-zinc-300 hover:text-white hover:bg-charcoal-800 rounded-lg transition backdrop-blur-md"
+            className="p-1.5 bg-charcoal-900/80 border border-charcoal-700/80 text-zinc-300 hover:text-white hover:bg-charcoal-800 rounded-lg transition backdrop-blur-md cursor-pointer"
           >
             {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
@@ -1003,18 +1728,19 @@ export const VisualizerModal: React.FC = () => {
           <button
             onClick={() => setOpen(false)}
             title="Close Visualizer (Esc / V)"
-            className="p-1.5 bg-crimson-900/70 border border-crimson-700/80 text-white hover:bg-crimson-800 rounded-lg transition backdrop-blur-md shadow-lg"
+            className="p-1.5 bg-crimson-900/70 border border-crimson-700/80 text-white hover:bg-crimson-800 rounded-lg transition backdrop-blur-md shadow-lg cursor-pointer"
           >
             <X size={16} />
           </button>
         </div>
       </div>
 
-      {/* Floating Bottom Media Bar Overlay */}
+      {/* Floating Bottom Media Bar Overlay (Placed at z-30 with e.stopPropagation() so buttons are ALWAYS clickable) */}
       <div
         onMouseEnter={() => setIsHoveringControls(true)}
         onMouseLeave={() => setIsHoveringControls(false)}
-        className={`absolute bottom-0 left-0 right-0 p-3 sm:p-5 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 pointer-events-auto flex items-center justify-between ${
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute bottom-0 left-0 right-0 z-30 p-3 sm:p-5 bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 pointer-events-auto flex items-center justify-between ${
           controlsVisible && showOverlay ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
@@ -1030,7 +1756,6 @@ export const VisualizerModal: React.FC = () => {
             ) : (
               <Waves size={20} className="text-zinc-600" />
             )}
-
           </div>
 
           <div className="flex flex-col truncate">
@@ -1054,7 +1779,7 @@ export const VisualizerModal: React.FC = () => {
           <button
             onClick={previous}
             title="Previous Track"
-            className="p-1.5 text-zinc-300 hover:text-white rounded-full transition active:scale-90"
+            className="p-1.5 text-zinc-300 hover:text-white rounded-full transition active:scale-90 cursor-pointer"
           >
             <SkipBack size={18} />
           </button>
@@ -1062,7 +1787,7 @@ export const VisualizerModal: React.FC = () => {
           <button
             onClick={togglePlay}
             title={isPlaying ? 'Pause' : 'Play'}
-            className="p-2.5 rounded-full bg-crimson-600 hover:bg-crimson-500 text-white shadow-lg active:scale-95 transition"
+            className="p-2.5 rounded-full bg-crimson-600 hover:bg-crimson-500 text-white shadow-lg active:scale-95 transition cursor-pointer"
           >
             {isPlaying ? (
               <Pause size={18} className="fill-white" />
@@ -1074,7 +1799,7 @@ export const VisualizerModal: React.FC = () => {
           <button
             onClick={next}
             title="Next Track"
-            className="p-1.5 text-zinc-300 hover:text-white rounded-full transition active:scale-90"
+            className="p-1.5 text-zinc-300 hover:text-white rounded-full transition active:scale-90 cursor-pointer"
           >
             <SkipForward size={18} />
           </button>
@@ -1083,7 +1808,7 @@ export const VisualizerModal: React.FC = () => {
         {/* Volume & Toggle Overlay */}
         <div className="flex items-center space-x-3">
           <div className="hidden sm:flex items-center space-x-2 bg-charcoal-900/80 border border-charcoal-700/80 px-2.5 py-1.5 rounded-lg backdrop-blur-md">
-            <button onClick={toggleMute} className="text-zinc-400 hover:text-white transition">
+            <button onClick={toggleMute} className="text-zinc-400 hover:text-white transition cursor-pointer">
               {isMuted || volume === 0 ? <VolumeX size={15} /> : <Volume2 size={15} />}
             </button>
             <input
@@ -1100,7 +1825,7 @@ export const VisualizerModal: React.FC = () => {
           <button
             onClick={toggleOverlay}
             title="Hide Overlay (H) for Ambient View"
-            className="p-2 bg-charcoal-900/80 border border-charcoal-700/80 text-zinc-400 hover:text-zinc-200 rounded-lg transition backdrop-blur-md"
+            className="p-2 bg-charcoal-900/80 border border-charcoal-700/80 text-zinc-400 hover:text-zinc-200 rounded-lg transition backdrop-blur-md cursor-pointer"
           >
             <EyeOff size={16} />
           </button>

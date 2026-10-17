@@ -21,6 +21,9 @@ export function useKeyboardShortcuts() {
   const {
     isEqualizerOpen,
     setEqualizerOpen,
+    isCommandPaletteOpen,
+    setCommandPaletteOpen,
+    toggleCommandPalette,
     isSettingsOpen,
     setSettingsOpen,
     isKeyboardShortcutsOpen,
@@ -30,6 +33,8 @@ export function useKeyboardShortcuts() {
     rightPanelOpen,
     toggleRightPanel,
     setRightPanelTab,
+    toggleLeftSidebar,
+    toggleFullscreen,
   } = useUiStore();
 
   const { isOpen: isVisualizerOpen, toggleOpen: toggleVisualizer, setOpen: setVisualizerOpen } = useVisualizerStore();
@@ -46,6 +51,10 @@ export function useKeyboardShortcuts() {
 
       // 1. Escape key: closes any open modal/drawer regardless of focus
       if (e.key === 'Escape') {
+        if (isCommandPaletteOpen) {
+          setCommandPaletteOpen(false);
+          return;
+        }
         if (isKeyboardShortcutsOpen) {
           setKeyboardShortcutsOpen(false);
           return;
@@ -73,14 +82,28 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // 2. Search Shortcut: '/' or 'Ctrl+K' focuses search input
-      if ((e.key === '/' && !isInputFocused) || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k')) {
+      // 2. Global Command Palette: 'Ctrl+K' or 'Cmd+K'
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        toggleCommandPalette();
+        return;
+      }
+
+      // 2b. Search Shortcut: '/' focuses top search input
+      if (e.key === '/' && !isInputFocused) {
         e.preventDefault();
         const searchInput = document.querySelector('input[placeholder*="Search"]') as HTMLInputElement | null;
         if (searchInput) {
           searchInput.focus();
           searchInput.select();
         }
+        return;
+      }
+
+      // 2c. Toggle Library Navigator: 'Ctrl+B'
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleLeftSidebar();
         return;
       }
 
@@ -167,6 +190,11 @@ export function useKeyboardShortcuts() {
         setEqualizerOpen(!isEqualizerOpen);
         return;
       }
+      if (e.key.toLowerCase() === 'f' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
       if (e.key.toLowerCase() === 'q' && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         if (!rightPanelOpen) toggleRightPanel();
@@ -203,5 +231,7 @@ export function useKeyboardShortcuts() {
     rightPanelOpen,
     toggleRightPanel,
     setRightPanelTab,
+    toggleLeftSidebar,
+    toggleFullscreen,
   ]);
 }

@@ -80,7 +80,11 @@ export function verifySession(token: string): { userId: string } | null {
   const payload = `${userId}.${timestamp}`;
   const expectedHmac = crypto.createHmac('sha256', config.SESSION_SECRET).update(payload).digest('hex');
   
-  if (hmac !== expectedHmac) return null;
+  const a = Buffer.from(hmac, 'utf8');
+  const b = Buffer.from(expectedHmac, 'utf8');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    return null;
+  }
   
   // 30 days session expiry
   const ts = parseInt(timestamp, 10);

@@ -36,9 +36,11 @@ export const KeyboardShortcutsModal: React.FC = () => {
       title: 'Navigation & Panels',
       icon: <ListMusic size={14} className="text-crimson-400" />,
       shortcuts: [
+        { keys: ['Ctrl', '+', 'K'], desc: 'Open Command Palette & Spotlight Search' },
         { keys: ['/'], desc: 'Quick focus search bar' },
-        { keys: ['Ctrl', '+', 'K'], desc: 'Focus search bar' },
+        { keys: ['Ctrl', '+', 'B'], desc: 'Toggle Library Navigator (Sidebar)' },
         { keys: ['Q'], desc: 'Toggle Queue drawer' },
+        { keys: ['F'], desc: 'Toggle Fullscreen mode (Layar Penuh)' },
         { keys: ['?'], desc: 'Toggle this keyboard cheatsheet' },
         { keys: ['Esc'], desc: 'Close any open modal or drawer' },
       ],
@@ -61,10 +63,10 @@ export const KeyboardShortcutsModal: React.FC = () => {
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 Keyboard Shortcuts
                 <span className="text-[10px] font-mono font-normal px-2 py-0.5 rounded bg-charcoal-800 text-zinc-400 border border-charcoal-700">
-                  MUSICBEE ERGONOMICS
+                  DESKTOP ERGONOMICS
                 </span>
               </h2>
-              <p className="text-xs text-zinc-400 mt-0.5">Control Black Library seamlessly with hardware keys</p>
+              <p className="text-xs text-zinc-400 mt-0.5">Control audio playback seamlessly with hardware keys</p>
             </div>
           </div>
           <button

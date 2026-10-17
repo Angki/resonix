@@ -20,6 +20,7 @@ import { usePlayerStore } from '../store/playerStore';
 import { useUiStore } from '../store/uiStore';
 import { useVisualizerStore } from '../store/visualizerStore';
 import { api } from '../api/client';
+import { LastFmIcon } from './LastFmIcon';
 
 function formatTime(sec: number): string {
   if (!sec || isNaN(sec) || !isFinite(sec) || sec <= 0) return '0:00';
@@ -130,17 +131,20 @@ export const MobileNowPlayingDrawer: React.FC = () => {
           {/* Scrobble Indicator Pill */}
           <div className="shrink-0">
             {isScrobbled ? (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-red-950/60 text-red-400 border border-red-750/70 shadow-sm">
-                <Radio size={10} className="text-red-500 animate-pulse" />
-                <span>SCROBBLED</span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-red-950/60 text-red-400 border border-red-750/70 shadow-sm">
+                <LastFmIcon size={12} className="text-[#D51007]" />
+                <span className="text-emerald-400 font-bold text-xs">✓</span>
               </span>
             ) : isEligible ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-400 bg-charcoal-900 border border-charcoal-800">
-                <Radio size={10} className="text-zinc-500" />
-                <span>{remainingScrobbleSec}s</span>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-400 bg-charcoal-900 border border-charcoal-800">
+                <LastFmIcon size={12} className="text-zinc-400 opacity-80" />
+                <span>⏳ {remainingScrobbleSec}s</span>
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-zinc-500">&lt;30s</span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono text-zinc-500 bg-charcoal-900 border border-charcoal-800">
+                <LastFmIcon size={10} className="text-zinc-600" />
+                <span>&lt;30s</span>
+              </span>
             )}
           </div>
         </div>

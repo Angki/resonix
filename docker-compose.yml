@@ -1,0 +1,54 @@
+# ==============================================================================
+# Resonix - Enterprise Docker Compose Orchestration
+# Turnkey self-hosted audiophile streaming server
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  resonix:
+    image: ghcr.io/angki/resonix:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: resonix
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=3000
+      - APP_BASE_URL=http://localhost:3000
+      - SESSION_SECRET=change_me_to_a_secure_random_string_min_32_chars!
+      - CREDENTIAL_ENCRYPTION_KEY=change_me_to_another_secure_key_min_32_chars!
+      - DATABASE_URL=file:/data/library.db
+      - LIBRARY_ROOTS_JSON=["/music"]
+      - PLAYLIST_IMPORT_PATH=/data/playlists
+      - DEPLOYMENT_PROFILE=PERSONAL
+      # Optional: Last.fm Scrobbler Integration
+      # - LASTFM_API_KEY=your_api_key
+      # - LASTFM_API_SECRET=your_api_secret
+      # Optional: Discogs Artist Metadata & HD Artwork
+      # - DISCOGS_CONSUMER_KEY=your_discogs_key
+      # - DISCOGS_CONSUMER_SECRET=your_discogs_secret
+    volumes:
+      # Mount your audio directories strictly READ-ONLY for absolute file protection
+      - /path/to/your/music:/music:ro
+      # Persistent application state (SQLite database, cached artwork, scrobble queues)
+      - resonix-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  resonix-data:
+    name: resonix-data

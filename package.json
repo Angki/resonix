@@ -1,8 +1,17 @@
 {
-  "name": "black-library",
+  "name": "resonix",
   "version": "1.0.0",
-  "description": "High-performance MusicBee-inspired web audio streaming server for Windows & Tailscale",
-  "private": true,
+  "description": "High-fidelity self-hosted audio streaming server, Subsonic API backend & audiophile web player with Web Audio DSP, real-time 60fps canvas visualizers, and PWA offline storage",
+  "author": "Angki",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Angki/resonix.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Angki/resonix/issues"
+  },
+  "homepage": "https://github.com/Angki/resonix#readme",
   "type": "module",
   "workspaces": [
     "server",
@@ -18,6 +27,8 @@
     "start": "node server/dist/index.js",
     "db:generate": "npm run db:generate --workspace=server",
     "db:migrate": "npm run db:migrate --workspace=server",
+    "db:clean-metadata": "tsx server/src/scripts/clean_metadata.ts",
+    "db:clean-metadata:dry": "tsx server/src/scripts/clean_metadata.ts --dry-run",
     "test": "npm run test --workspace=server"
   },
   "devDependencies": {

@@ -15,6 +15,37 @@
   --theme-accent-light: #f87171;
 }
 
+[data-theme="resonance"] {
+  color-scheme: dark;
+  --theme-bg-950: #06090e;
+  --theme-bg-900: #0a101a;
+  --theme-bg-850: #0f1827;
+  --theme-bg-800: #152236;
+  --theme-bg-750: #1c2e48;
+  --theme-bg-700: #263c5c;
+  --theme-accent-dark: #083344;
+  --theme-accent: #06b6d4;
+  --theme-accent-light: #67e8f9;
+}
+
+[data-theme="resonance"] body {
+  background-color: #06090e;
+  color: #e2e8f0;
+}
+
+[data-theme="resonance"] ::-webkit-scrollbar-track {
+  background: #0a101a;
+}
+
+[data-theme="resonance"] ::-webkit-scrollbar-thumb {
+  background: #1c2e48;
+  border-radius: 4px;
+}
+
+[data-theme="resonance"] ::-webkit-scrollbar-thumb:hover {
+  background: #06b6d4;
+}
+
 [data-theme="spotify"] {
   color-scheme: dark;
   --theme-bg-950: #070707;
@@ -28,7 +59,9 @@
   --theme-accent-light: #4ade80;
 }
 
-[data-theme="musicbee"] {
+[data-theme="musicbee"],
+[data-theme="cobalt"],
+[data-theme="slate"] {
   color-scheme: dark;
   --theme-bg-950: #090e17;
   --theme-bg-900: #0f172a;
@@ -74,20 +107,56 @@
 
 [data-theme="glass"] {
   color-scheme: dark;
-  --theme-bg-950: #08090d;
-  --theme-bg-900: #0f1118;
-  --theme-bg-850: #151824;
-  --theme-bg-800: #1d2133;
-  --theme-bg-750: #262b42;
-  --theme-bg-700: #333a57;
+  --theme-bg-950: rgba(8, 9, 14, 0.65);
+  --theme-bg-900: rgba(14, 16, 24, 0.7);
+  --theme-bg-850: rgba(20, 23, 36, 0.75);
+  --theme-bg-800: rgba(28, 33, 50, 0.8);
+  --theme-bg-750: rgba(38, 43, 66, 0.85);
+  --theme-bg-700: rgba(50, 58, 88, 0.9);
   --theme-accent-dark: #831843;
-  --theme-accent: #e11d48;
-  --theme-accent-light: #fb7185;
+  --theme-accent: #f43f5e;
+  --theme-accent-light: #fda4af;
 }
 
 [data-theme="glass"] body {
-  background: radial-gradient(circle at 50% 0%, #171926 0%, #08090d 100%);
+  background-color: #050609;
   color: #f1f5f9;
+}
+
+[data-theme="glass"] .bg-charcoal-950 {
+  background-color: rgba(6, 7, 11, 0.55) !important;
+  backdrop-filter: blur(28px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
+}
+
+[data-theme="glass"] .bg-charcoal-900 {
+  background-color: rgba(12, 14, 22, 0.58) !important;
+  backdrop-filter: blur(22px) saturate(170%) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(170%) !important;
+}
+
+[data-theme="glass"] .bg-charcoal-850 {
+  background-color: rgba(18, 21, 33, 0.62) !important;
+  backdrop-filter: blur(18px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(160%) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="glass"] .bg-charcoal-800 {
+  background-color: rgba(26, 30, 48, 0.65) !important;
+  backdrop-filter: blur(16px) saturate(150%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(150%) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+[data-theme="glass"] header,
+[data-theme="glass"] footer {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="glass"] .border-charcoal-750,
+[data-theme="glass"] .border-charcoal-800 {
+  border-color: rgba(255, 255, 255, 0.08) !important;
 }
 
 [data-theme="metro-dark"] {
@@ -138,7 +207,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* MusicBee custom compact dark scrollbars */
+/* Custom compact dark scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -159,4 +228,74 @@ body {
 
 input, textarea {
   user-select: text;
+}
+
+/* ============================================================
+   Ambient Glassmorphism Animated Color Orbs Keyframes
+   ============================================================ */
+@keyframes orb-float-1 {
+  0% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  33% { transform: translate3d(90px, -70px, 0) scale(1.15) rotate(45deg); }
+  66% { transform: translate3d(-60px, 80px, 0) scale(0.9) rotate(-30deg); }
+  100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+}
+
+@keyframes orb-float-2 {
+  0% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+  33% { transform: translate3d(-100px, 90px, 0) scale(1.2) rotate(-60deg); }
+  66% { transform: translate3d(70px, -50px, 0) scale(0.85) rotate(35deg); }
+  100% { transform: translate3d(0, 0, 0) scale(1) rotate(0deg); }
+}
+
+@keyframes orb-float-3 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(80px, 100px, 0) scale(1.25); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes orb-float-4 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-90px, -80px, 0) scale(1.18); }
+  100% { transform: translate3d(0, 0, 0) scale(1); }
+}
+
+.animate-orb-1 {
+  animation: orb-float-1 26s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.animate-orb-2 {
+  animation: orb-float-2 32s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.animate-orb-3 {
+  animation: orb-float-3 22s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+.animate-orb-4 {
+  animation: orb-float-4 36s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+/* Glassmorphism Card and Panel Utilities */
+.glass-panel {
+  background: rgba(20, 23, 35, 0.45);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.035);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.16);
 }

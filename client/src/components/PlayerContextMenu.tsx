@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Compass,
   ListMusic,
@@ -9,9 +10,12 @@ import {
   Check,
   Disc,
   ExternalLink,
+  Download,
+  CheckCircle,
 } from 'lucide-react';
 import { Track } from '../types';
 import { useUiStore } from '../store/uiStore';
+import { offlineStorageService } from '../services/offlineStorageService';
 
 interface PlayerContextMenuProps {
   x: number;
@@ -107,11 +111,13 @@ export const PlayerContextMenu: React.FC<PlayerContextMenuProps> = ({
   const posX = Math.min(Math.max(10, x), window.innerWidth - 240);
   const posY = Math.max(10, Math.min(y - 250, window.innerHeight - 270));
 
-  return (
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
       ref={menuRef}
       style={{ top: posY, left: posX }}
-      className="fixed z-50 w-56 bg-charcoal-850/95 border border-charcoal-700 rounded-lg shadow-2xl py-1 text-xs select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
+      className="fixed z-[9999] w-56 bg-charcoal-850/95 border border-charcoal-700 rounded-lg shadow-2xl py-1 text-xs select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
     >
       {/* Track Title Header */}
       <div className="px-3 py-1.5 border-b border-charcoal-750">
@@ -158,6 +164,32 @@ export const PlayerContextMenu: React.FC<PlayerContextMenuProps> = ({
         <span className="truncate">Filter Artist: {track.artistName}</span>
       </button>
 
+      {/* Save for Offline */}
+      <button
+        onClick={async () => {
+          onClose();
+          const isOff = offlineStorageService.isOffline(track.id);
+          if (isOff) {
+            await offlineStorageService.removeTrack(track.id);
+          } else {
+            await offlineStorageService.saveTrack(track);
+          }
+        }}
+        className="w-full flex items-center space-x-2.5 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
+      >
+        {offlineStorageService.isOffline(track.id) ? (
+          <>
+            <CheckCircle size={13} className="text-emerald-400" />
+            <span>Remove from Offline Cache</span>
+          </>
+        ) : (
+          <>
+            <Download size={13} className="text-cyan-400" />
+            <span>Save for Offline Playback</span>
+          </>
+        )}
+      </button>
+
       <div className="border-t border-charcoal-750 my-1" />
 
       {/* Technical Properties */}
@@ -177,6 +209,7 @@ export const PlayerContextMenu: React.FC<PlayerContextMenuProps> = ({
         {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} className="text-zinc-400" />}
         <span>{copied ? 'Copied to Clipboard!' : 'Copy Track Title & Artist'}</span>
       </button>
-    </div>
+    </div>,
+    document.body
   );
 };

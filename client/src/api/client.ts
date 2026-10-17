@@ -1,4 +1,4 @@
-import { Track, Artist, Album, Playlist, ScanStatus, User, MusicBeeCandidate } from '../types';
+import { Track, Artist, Album, Playlist, ScanStatus, User, ExternalPlaylistCandidate, MusicBeeCandidate, ArtistListItem, ArtistDetail, ArtistBatchStatus, LyricsData, SmartPlaylistPreset, SmartPlaylistDetail, SimilarArtistsResponse, AlbumScan, LibraryAuditResult } from '../types';
 
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
@@ -53,8 +53,35 @@ export const api = {
     return fetchJson<{ total: number; page: number; limit: number; tracks: Track[] }>(`/api/tracks?${q.toString()}`);
   },
   getTrack: (id: string) => fetchJson<Track>(`/api/tracks/${id}`),
-  getArtists: () => fetchJson<Artist[]>('/api/tracks/artists'),
-  getAlbums: (params?: { artistId?: string; rootId?: string; search?: string; searchField?: string; sortBy?: string; sortOrder?: 'asc' | 'desc' } | string, rootId?: string) => {
+  getArtistsList: (params: { search?: string; sortBy?: 'name' | 'albumCount' | 'trackCount' | 'totalPlays'; order?: 'asc' | 'desc'; limit?: number; offset?: number; rootId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.search) q.set('search', params.search);
+    if (params.sortBy) q.set('sortBy', params.sortBy);
+    if (params.order) q.set('order', params.order);
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.offset) q.set('offset', String(params.offset));
+    if (params.rootId) q.set('rootId', params.rootId);
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<ArtistListItem[]>(`/api/artists${qs}`);
+  },
+  getArtistDetail: (id: string, rootId?: string) =>
+    fetchJson<ArtistDetail>(`/api/artists/${id}${rootId ? `?rootId=${encodeURIComponent(rootId)}` : ''}`),
+  getArtistPhotoUrl: (id: string) => `/api/artists/${id}/photo`,
+  getArtistLogoUrl: (id: string) => `/api/artists/${id}/logo`,
+  fetchArtistArt: (id: string, force = true) =>
+    fetchJson<{ ok: boolean; data: any }>(`/api/artists/${id}/fetch-art`, {
+      method: 'POST',
+      body: JSON.stringify({ force }),
+    }),
+  getArtistBatchStatus: () => fetchJson<ArtistBatchStatus>('/api/artists/batch-status'),
+  startArtistBatchFetch: (action: 'start' | 'pause' = 'start', force = false) =>
+    fetchJson<{ ok: boolean; status: string }>('/api/artists/batch-fetch', {
+      method: 'POST',
+      body: JSON.stringify({ action, force }),
+    }),
+  getArtists: (params?: { rootId?: string }) =>
+    fetchJson<Artist[]>(`/api/tracks/artists${params?.rootId ? `?rootId=${encodeURIComponent(params.rootId)}` : ''}`),
+  getAlbums: (params?: { artistId?: string; rootId?: string; search?: string; searchField?: string; sortBy?: string; sortOrder?: 'asc' | 'desc'; quality?: string } | string, rootId?: string) => {
     const q = new URLSearchParams();
     if (typeof params === 'string') {
       if (params) q.set('artistId', params);
@@ -66,6 +93,7 @@ export const api = {
       if (params.searchField) q.set('searchField', params.searchField);
       if (params.sortBy) q.set('sortBy', params.sortBy);
       if (params.sortOrder) q.set('sortOrder', params.sortOrder);
+      if (params.quality) q.set('quality', params.quality);
     }
     const qs = q.toString() ? `?${q.toString()}` : '';
     return fetchJson<Album[]>(`/api/tracks/albums${qs}`);
@@ -81,7 +109,36 @@ export const api = {
     fetchJson<{ trackId: string; isFavorite: boolean }>('/api/playback/favorite', { method: 'POST', body: JSON.stringify({ trackId }) }),
   setRating: (trackId: string, rating: number | null) =>
     fetchJson<{ trackId: string; rating: number | null }>('/api/playback/rate', { method: 'POST', body: JSON.stringify({ trackId, rating }) }),
-  getHistory: () => fetchJson<Array<{ trackId: string; title: string; artistName: string; albumTitle: string; duration: number; lastPlayedAt: string; playCount: number }>>('/api/playback/history'),
+  getHistory: (limit: number = 100) =>
+    fetchJson<Array<{
+      trackId: string;
+      id: string;
+      title: string;
+      artistName: string;
+      albumTitle: string;
+      duration: number;
+      isLossless: boolean;
+      codec?: string;
+      bitrate?: number;
+      artworkId?: string;
+      lastPlayedAt: string;
+      playCount: number;
+      totalListeningTime: number;
+      isFavorite: boolean;
+      rating: number | null;
+      track?: Track;
+    }>>(`/api/playback/history?limit=${limit}`),
+  getPlaybackStats: () =>
+    fetchJson<{
+      totalListeningHours: number;
+      totalPlays: number;
+      uniqueTracks: number;
+      uniqueArtists: number;
+      losslessPercentage: number;
+      dailyActivity: Array<{ date: string; label: string; count: number; minutes: number }>;
+      topArtists: Array<{ name: string; playCount: number; minutes: number }>;
+      topGenres: Array<{ name: string; count: number }>;
+    }>('/api/playback/stats'),
 
   // Playlists
   getPlaylists: () => fetchJson<Playlist[]>('/api/playlists'),
@@ -93,12 +150,19 @@ export const api = {
   removeTrackFromPlaylist: (playlistId: string, trackId: string) =>
     fetchJson<{ success: boolean }>(`/api/playlists/${playlistId}/tracks/${trackId}`, { method: 'DELETE' }),
 
-  // MusicBee
-  getMusicBeeCandidates: () => fetchJson<{ discoveryPath: string; candidates: MusicBeeCandidate[]; pastImports: any[] }>('/api/musicbee/candidates'),
+  // External Playlists (.mbp / .m3u / .xautopf)
+  getExternalPlaylistCandidates: () => fetchJson<{ discoveryPath: string; candidates: ExternalPlaylistCandidate[]; pastImports: any[] }>('/api/external-playlists/candidates'),
+  previewExternalPlaylist: (filePath: string) =>
+    fetchJson<{ playlistName: string; total: number; matchedCount: number; unmatchedCount: number; matchedTracks: any[]; unmatchedSample: string[] }>('/api/external-playlists/preview', { method: 'POST', body: JSON.stringify({ filePath }) }),
+  importExternalPlaylist: (filePath: string) =>
+    fetchJson<{ success: boolean; playlistId: string; playlistName: string; tracksImported: number; unmatchedCount: number }>('/api/external-playlists/import', { method: 'POST', body: JSON.stringify({ filePath }) }),
+
+  // Backwards-compatible aliases
+  getMusicBeeCandidates: () => fetchJson<{ discoveryPath: string; candidates: MusicBeeCandidate[]; pastImports: any[] }>('/api/external-playlists/candidates'),
   previewMusicBeePlaylist: (filePath: string) =>
-    fetchJson<{ playlistName: string; total: number; matchedCount: number; unmatchedCount: number; matchedTracks: any[]; unmatchedSample: string[] }>('/api/musicbee/preview', { method: 'POST', body: JSON.stringify({ filePath }) }),
+    fetchJson<{ playlistName: string; total: number; matchedCount: number; unmatchedCount: number; matchedTracks: any[]; unmatchedSample: string[] }>('/api/external-playlists/preview', { method: 'POST', body: JSON.stringify({ filePath }) }),
   importMusicBeePlaylist: (filePath: string) =>
-    fetchJson<{ success: boolean; playlistId: string; playlistName: string; tracksImported: number; unmatchedCount: number }>('/api/musicbee/import', { method: 'POST', body: JSON.stringify({ filePath }) }),
+    fetchJson<{ success: boolean; playlistId: string; playlistName: string; tracksImported: number; unmatchedCount: number }>('/api/external-playlists/import', { method: 'POST', body: JSON.stringify({ filePath }) }),
 
   // Last.fm
   getLastFmStatus: () => fetchJson<{ hasApiKeysConfigured: boolean; isConnected: boolean; username: string | null; isScrobblingEnabled: boolean; pendingCount: number; recentJobs: any[] }>('/api/lastfm/status'),
@@ -106,10 +170,56 @@ export const api = {
   completeLastFmCallback: (token: string) => fetchJson<{ success: boolean; username: string }>('/api/lastfm/callback', { method: 'POST', body: JSON.stringify({ token }) }),
   disconnectLastFm: () => fetchJson<{ success: boolean }>('/api/lastfm/disconnect', { method: 'POST' }),
   toggleLastFmScrobble: () => fetchJson<{ isScrobblingEnabled: boolean }>('/api/lastfm/toggle-scrobble', { method: 'POST' }),
+  syncAlbumLastFm: (albumId: string) =>
+    fetchJson<{ success: boolean; totalTracks: number; syncedCount: number; updates: Array<{ trackId: string; playCount: number }> }>(
+      '/api/lastfm/sync-album',
+      { method: 'POST', body: JSON.stringify({ albumId }) }
+    ),
+  syncArtistLastFm: (artistId: string, rootId?: string) =>
+    fetchJson<{ success: boolean; totalTracks: number; syncedCount: number; updates: Array<{ trackId: string; playCount: number }> }>(
+      '/api/lastfm/sync-artist',
+      { method: 'POST', body: JSON.stringify({ artistId, rootId }) }
+    ),
+  syncTrackLastFm: (trackId: string) =>
+    fetchJson<{ success: boolean; trackId: string; playCount: number }>(
+      '/api/lastfm/sync-track',
+      { method: 'POST', body: JSON.stringify({ trackId }) }
+    ),
+  syncLibraryLastFm: (limit = 1000) =>
+    fetchJson<{ success: boolean; fetchedTracks: number; matchedTracks: number; updatedTracks: number }>(
+      '/api/lastfm/sync-library',
+      { method: 'POST', body: JSON.stringify({ limit }) }
+    ),
 
   // Settings
-  getSettings: () => fetchJson<{ settings: Record<string, string>; system: any }>('/api/settings'),
+  getSettings: () => fetchJson<{ settings: Record<string, string>; system: any; subsonic?: any }>('/api/settings'),
   saveSettings: (body: Record<string, string>) => fetchJson<{ success: boolean }>('/api/settings', { method: 'POST', body: JSON.stringify(body) }),
+  restartServer: () => fetchJson<{ success: boolean; message: string }>('/api/settings/restart', { method: 'POST' }),
+  updateSubsonicPassword: (password: string) =>
+    fetchJson<{ success: boolean; message: string }>('/api/settings/subsonic/password', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
+
+  // Lyrics
+  getTrackLyrics: (trackId: string) => fetchJson<LyricsData>(`/api/lyrics/${trackId}`),
+  refetchTrackLyrics: (trackId: string) => fetchJson<LyricsData>(`/api/lyrics/${trackId}/refetch`, { method: 'POST' }),
+
+  // Smart Playlists
+  getSmartPlaylists: () => fetchJson<SmartPlaylistPreset[]>('/api/smart-playlists'),
+  getSmartPlaylistDetail: (key: string) => fetchJson<SmartPlaylistDetail>(`/api/smart-playlists/${key}`),
+
+  // Similar Artists
+  getSimilarArtists: (artistId: string) => fetchJson<SimilarArtistsResponse>(`/api/artists/${artistId}/similar`),
+  refetchSimilarArtists: (artistId: string) => fetchJson<SimilarArtistsResponse>(`/api/artists/${artistId}/similar/refetch`, { method: 'POST' }),
+
+  // Physical Album Scans & Booklets
+  getAlbumScans: (albumId: string) => fetchJson<AlbumScan[]>(`/api/tracks/albums/${albumId}/scans`),
+  getAlbumScanFileUrl: (albumId: string, relPath: string) =>
+    `/api/tracks/albums/${albumId}/scans/file?relPath=${encodeURIComponent(relPath)}`,
+
+  // Library Health & Audio Quality Audit
+  getLibraryAudit: () => fetchJson<LibraryAuditResult>('/api/library/audit'),
 
   // Helpers
   getStreamUrl: (trackId: string, transcode: boolean = false) =>

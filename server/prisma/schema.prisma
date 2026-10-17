@@ -5,6 +5,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
 }
 
 model User {
@@ -38,12 +39,18 @@ model LibraryRoot {
 }
 
 model Artist {
-  id             String   @id @default(uuid())
-  name           String   @unique
+  id             String    @id @default(uuid())
+  name           String    @unique
   normalizedName String
   bio            String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  photoPath      String?
+  logoPath       String?
+  discogsId      Int?
+  metallumId     String?
+  similarArtists String?
+  artFetchedAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   tracks         Track[]
   albums         Album[]
@@ -131,6 +138,8 @@ model Track {
   externalStats        ExternalTrackStats[]
   scrobbleJobs         ScrobbleJob[]
 
+  @@index([albumId])
+  @@index([isLossless])
   @@index([artistName])
   @@index([albumTitle])
   @@index([genre])

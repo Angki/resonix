@@ -10,12 +10,14 @@ import {
   ArrowUpDown,
   Search,
   X,
+  Sparkles,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Album, Track } from '../types';
 import { useUiStore } from '../store/uiStore';
 import { usePlayerStore } from '../store/playerStore';
 import { api } from '../api/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlbumContextMenu } from './AlbumContextMenu';
 import { AlbumTracksModal } from './AlbumTracksModal';
 import { AlphabetBar } from './AlphabetBar';
@@ -35,6 +37,13 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
   onContextMenu,
 }) => {
   const playTrack = usePlayerStore((s) => s.playTrack);
+  const {
+    gridDensity,
+    showGridTrackCount,
+    showGridQualityBadge,
+    showGridYear,
+    showGridArtist,
+  } = useUiStore();
 
   const artworkUrl = album.artworkId
     ? api.getArtworkUrl(album.artworkId, 256)
@@ -49,6 +58,9 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
     });
   };
 
+  const isCompact = gridDensity === 'compact';
+  const isMinimal = gridDensity === 'minimal';
+
   return (
     <div
       id={`album-card-${album.id}`}
@@ -56,16 +68,24 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
         e.preventDefault();
         onContextMenu(e);
       }}
-      className={`group bg-charcoal-850 border rounded-md p-2.5 transition-all duration-300 col-span-1 flex flex-col select-none ${
+      className={`group transition-all duration-200 col-span-1 flex flex-col select-none rounded-lg ${
+        isMinimal
+          ? 'bg-transparent p-0'
+          : isCompact
+          ? 'bg-charcoal-850/90 border border-charcoal-800/90 hover:border-charcoal-700 hover:bg-charcoal-800 p-1.5'
+          : 'bg-charcoal-850 border border-charcoal-800 hover:border-charcoal-700 hover:bg-charcoal-800/80 p-2.5'
+      } ${
         isHighlighted
           ? 'ring-2 ring-crimson-500 border-crimson-500 bg-charcoal-800 shadow-xl shadow-crimson-900/50 scale-[1.02] animate-pulse z-10'
-          : 'border-charcoal-800 hover:border-charcoal-700 hover:bg-charcoal-800/80'
+          : ''
       }`}
     >
       {/* Cover Art - Clicking opens tracklist modal popup */}
       <div
         onClick={onOpenModal}
-        className="relative rounded bg-charcoal-900 overflow-hidden cursor-pointer w-full aspect-square mb-2 group/cover select-none shrink-0"
+        className={`relative rounded-md bg-charcoal-900 overflow-hidden cursor-pointer w-full aspect-square group/cover select-none shrink-0 shadow-sm transition-transform duration-200 ${
+          isMinimal ? 'mb-1.5' : isCompact ? 'mb-1.5' : 'mb-2'
+        }`}
         title="Click to view tracklist popup (Right-click for options)"
       >
         <img
@@ -73,7 +93,7 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
           alt={album.title}
           loading="lazy"
           decoding="async"
-          className="w-full h-full object-cover group-hover/cover:scale-105 transition duration-200"
+          className="w-full h-full object-cover group-hover/cover:scale-105 transition duration-300"
           onError={(e) => {
             const target = e.target as HTMLImageElement;
             target.onerror = null;
@@ -81,63 +101,70 @@ const AlbumCard: React.FC<AlbumCardProps> = ({
           }}
         />
 
-        {/* Track count badge (Solid crisp badge without expensive GPU blur filter) */}
-        <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/85 text-[10px] font-mono text-zinc-300 flex items-center space-x-1 border border-black/50 shadow pointer-events-none">
-          <Disc size={10} className="text-crimson-400" />
-          <span>{album.trackCount}</span>
-        </div>
-
-        {/* Hover overlay hint */}
-        <div className="absolute inset-0 bg-black/45 opacity-0 group-hover/cover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
-          <div className="px-2.5 py-1 rounded bg-black/85 text-[11px] font-medium text-zinc-200 flex items-center space-x-1.5 border border-zinc-700/60 shadow">
-            <ListMusic size={12} className="text-crimson-400" />
-            <span>View Tracks</span>
+        {/* Quality badge (Top-left, if enabled) */}
+        {showGridQualityBadge && album.qualityBadge && (
+          <div
+            className={`absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded text-[9px] font-mono tracking-wider font-semibold flex items-center space-x-1 border shadow pointer-events-none backdrop-blur-xs ${
+              album.qualityBadge === 'HI-RES'
+                ? 'bg-amber-950/90 text-amber-300 border-amber-600/60 shadow-amber-950/50'
+                : album.isLossless
+                ? 'bg-cyan-950/90 text-cyan-300 border-cyan-600/60 shadow-cyan-950/50'
+                : album.qualityBadge === '320K'
+                ? 'bg-emerald-950/90 text-emerald-300 border-emerald-600/60 shadow-emerald-950/50'
+                : 'bg-black/85 text-zinc-400 border-zinc-700/60 shadow-black/50'
+            }`}
+            title={`${album.qualityBadge}${album.maxBitDepth ? ` ${album.maxBitDepth}-bit` : ''}${album.maxSampleRate ? ` / ${Math.round(album.maxSampleRate / 1000)}kHz` : ''}`}
+          >
+            <span>{album.qualityBadge}</span>
           </div>
-        </div>
+        )}
+
+        {/* Track count badge (Top-right, if enabled) */}
+        {showGridTrackCount && (
+          <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/85 text-[10px] font-mono text-zinc-300 flex items-center space-x-1 border border-black/50 shadow pointer-events-none">
+            <Disc size={10} className="text-crimson-400" />
+            <span>{album.trackCount}</span>
+          </div>
+        )}
 
         {/* Play All overlay button */}
         <button
           onClick={handlePlayAll}
           title="Play Album"
-          className="absolute bottom-2 right-2 p-2 sm:p-2.5 rounded-full bg-crimson-700 hover:bg-crimson-600 text-white shadow-xl opacity-90 sm:opacity-0 sm:group-hover/cover:opacity-100 transition transform hover:scale-110 active:scale-95 z-10"
+          className="absolute bottom-2 right-2 p-2 sm:p-2.5 rounded-full bg-crimson-700 hover:bg-crimson-600 text-white shadow-xl opacity-0 group-hover/cover:opacity-100 transition transform hover:scale-110 active:scale-95 z-10"
         >
           <Play size={13} className="fill-white translate-x-0.5" />
         </button>
       </div>
 
       {/* Title & Metadata */}
-      <div className="flex-1 min-w-0 w-full flex flex-col justify-between">
-        <div>
-          <div
-            onClick={onOpenModal}
-            className="truncate font-medium text-zinc-200 text-xs hover:text-white cursor-pointer"
-            title={album.title}
-          >
-            {album.title}
-          </div>
+      <div className="flex-1 min-w-0 w-full flex flex-col justify-start">
+        <div
+          onClick={onOpenModal}
+          className={`truncate font-medium text-zinc-200 hover:text-white cursor-pointer ${
+            isCompact ? 'text-[11px] leading-snug' : 'text-xs'
+          }`}
+          title={album.title}
+        >
+          {album.title}
+        </div>
 
+        {showGridArtist && (
           <div
-            className="truncate text-zinc-400 text-[11px] mt-0.5"
+            className={`truncate text-zinc-400 mt-0.5 ${
+              isCompact ? 'text-[10px]' : 'text-[11px]'
+            }`}
             title={album.artistName}
           >
             {album.artistName}
           </div>
-        </div>
+        )}
 
-        <div className="flex items-center justify-between text-zinc-500 font-mono text-[10px] mt-1.5 pt-1 border-t border-charcoal-800/50">
-          <span>{album.year || '-'}</span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenModal();
-            }}
-            className="flex items-center space-x-1 text-zinc-400 hover:text-crimson-400 transition cursor-pointer"
-            title="Open Tracklist Popup"
-          >
-            <span>Tracks</span>
-            <ListMusic size={11} />
-          </button>
-        </div>
+        {showGridYear && album.year && (
+          <div className="text-zinc-500 font-mono text-[9px] mt-0.5">
+            {album.year}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -157,12 +184,26 @@ export const AlbumGrid: React.FC = () => {
     albumSortBy,
     albumSortOrder,
     setAlbumSorting,
+    albumQualityFilter,
+    setAlbumQualityFilter,
     gridCoverSize,
     setGridCoverSize,
+    gridDensity,
+    setGridDensity,
+    showGridTrackCount,
+    setShowGridTrackCount,
+    showGridQualityBadge,
+    setShowGridQualityBadge,
+    showGridYear,
+    setShowGridYear,
+    showGridArtist,
+    setShowGridArtist,
     highlightedAlbumId,
     setHighlightedAlbumId,
   } = useUiStore();
 
+  const queryClient = useQueryClient();
+  const [showGridOptions, setShowGridOptions] = useState(false);
   const [modalAlbum, setModalAlbum] = useState<Album | null>(null);
   const [albumContextMenu, setAlbumContextMenu] = useState<{
     x: number;
@@ -178,9 +219,9 @@ export const AlbumGrid: React.FC = () => {
     return 1000;
   });
 
-  // Wire search query & MusicBee sorting
-  const { data: albums, isLoading } = useQuery({
-    queryKey: ['albums', selectedRootId, searchQuery, searchField, albumSortBy, albumSortOrder],
+  // Wire search query & album sorting & Quality filter
+  const { data: albums, isLoading, isFetching } = useQuery({
+    queryKey: ['albums', selectedRootId, searchQuery, searchField, albumSortBy, albumSortOrder, albumQualityFilter],
     queryFn: () =>
       api.getAlbums({
         rootId: selectedRootId || undefined,
@@ -188,7 +229,10 @@ export const AlbumGrid: React.FC = () => {
         searchField: searchField !== 'all' ? searchField : undefined,
         sortBy: albumSortBy || undefined,
         sortOrder: albumSortOrder || undefined,
+        quality: albumQualityFilter !== 'all' ? albumQualityFilter : undefined,
       }),
+    placeholderData: (previousData) => previousData,
+    staleTime: 1000 * 60 * 2,
   });
 
   // Track parent width for virtualizer responsive layout
@@ -225,8 +269,14 @@ export const AlbumGrid: React.FC = () => {
   };
 
   // Virtualizer grid column & row calculation
-  const horizontalPadding = containerWidth < 640 ? 24 : 32;
-  const gap = containerWidth < 640 ? 12 : 16;
+  const isCompact = gridDensity === 'compact';
+  const isMinimal = gridDensity === 'minimal';
+  const horizontalPadding = containerWidth < 640 ? 16 : 24;
+  const gap = isCompact
+    ? (containerWidth < 640 ? 8 : 10)
+    : isMinimal
+    ? (containerWidth < 640 ? 10 : 12)
+    : (containerWidth < 640 ? 12 : 16);
   const usableWidth = Math.max(120, containerWidth - horizontalPadding);
   const columnCount = Math.max(1, Math.floor((usableWidth + gap) / (gridCoverSize + gap)));
 
@@ -240,7 +290,8 @@ export const AlbumGrid: React.FC = () => {
     return res;
   }, [albums, columnCount]);
 
-  const estimatedRowHeight = Math.round(usableWidth / columnCount + 70);
+  const metadataExtra = isCompact ? 44 : isMinimal ? 40 : 58;
+  const estimatedRowHeight = Math.round(usableWidth / columnCount + metadataExtra);
 
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
 
@@ -330,9 +381,15 @@ export const AlbumGrid: React.FC = () => {
   return (
     <div
       onWheel={handleWheel}
-      className="flex-1 flex flex-col h-full overflow-hidden bg-charcoal-900 select-none"
+      className="flex-1 flex flex-col h-full overflow-hidden bg-charcoal-900 select-none relative"
     >
-      {/* Grid Sub-header: Collection context, MusicBee Sorting & Zoom Slider */}
+      {/* Background loading shimmer bar */}
+      {isFetching && (
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-crimson-950/60 overflow-hidden z-30 pointer-events-none">
+          <div className="h-full bg-gradient-to-r from-crimson-600 via-crimson-400 to-crimson-600 animate-pulse w-full" />
+        </div>
+      )}
+      {/* Grid Sub-header: Collection context, Album Sorting & Zoom Slider */}
       <div className="px-3 sm:px-4 py-2 bg-charcoal-950/80 border-b border-charcoal-800 flex items-center justify-between gap-2 shrink-0 text-xs flex-wrap sm:flex-nowrap">
         {/* Left: Active collection context & search badge */}
         <div className="flex items-center space-x-2 truncate min-w-0">
@@ -365,19 +422,49 @@ export const AlbumGrid: React.FC = () => {
           )}
         </div>
 
-        {/* Right: MusicBee Sorting selector & Grid Size Slider */}
-        <div className="flex items-center space-x-2 shrink-0 ml-auto">
-          {/* Sorting Dropdown (MusicBee style) */}
+        {/* Right: Quality Filter, Album Sorting selector & Grid Size Slider */}
+        <div className="flex items-center space-x-2 shrink-0 ml-auto flex-wrap sm:flex-nowrap gap-y-1">
+          {/* Quality Filter Dropdown */}
+          <div className="flex items-center space-x-1 bg-charcoal-850/80 px-2 py-1 rounded border border-charcoal-800/80 text-[11px]">
+            <Sparkles size={11} className="text-amber-400 shrink-0" />
+            <select
+              value={albumQualityFilter}
+              onChange={(e) => setAlbumQualityFilter(e.target.value)}
+              title="Filter by Quality"
+              className="bg-transparent text-zinc-300 focus:outline-none cursor-pointer pr-1"
+            >
+              <option value="all" className="bg-charcoal-900 text-zinc-200">
+                All Qualities
+              </option>
+              <option value="hires" className="bg-charcoal-900 text-amber-300">
+                ★ Hi-Res Audio (24-bit / 96kHz+)
+              </option>
+              <option value="lossless" className="bg-charcoal-900 text-cyan-300">
+                Lossless (FLAC / ALAC / WAV)
+              </option>
+              <option value="320k" className="bg-charcoal-900 text-emerald-300">
+                320 kbps (High Quality)
+              </option>
+              <option value="standard" className="bg-charcoal-900 text-zinc-300">
+                Standard / VBR
+              </option>
+            </select>
+          </div>
+
+          {/* Sorting Dropdown (Classic style) */}
           <div className="flex items-center space-x-1 bg-charcoal-850/80 px-2 py-1 rounded border border-charcoal-800/80 text-[11px]">
             <ArrowUpDown size={11} className="text-zinc-500 shrink-0" />
             <select
               value={currentSortValue}
               onChange={handleSortChange}
-              title="MusicBee Album Sorting Options"
+              title="Album Sorting Options"
               className="bg-transparent text-zinc-300 focus:outline-none cursor-pointer pr-1"
             >
               <option value="albumArtist:asc" className="bg-charcoal-900 text-zinc-200">
-                Artist → Year → Album (MusicBee)
+                Artist → Year → Album (Classic)
+              </option>
+              <option value="quality:desc" className="bg-charcoal-900 text-zinc-200">
+                Audio Quality (Hi-Res → Standard)
               </option>
               <option value="title:asc" className="bg-charcoal-900 text-zinc-200">
                 Album Title (A - Z)
@@ -403,7 +490,7 @@ export const AlbumGrid: React.FC = () => {
             </select>
           </div>
 
-          {/* Grid Size Zoom Control (MusicBee style) */}
+          {/* Grid Size Zoom Control (Ergonomic style) */}
           <div className="flex items-center space-x-1.5 shrink-0 bg-charcoal-850/80 px-2 py-1 rounded border border-charcoal-800/80">
             <button
               onClick={() => setGridCoverSize(gridCoverSize - 20)}
@@ -435,6 +522,120 @@ export const AlbumGrid: React.FC = () => {
             <span className="font-mono text-[10px] text-zinc-500 w-9 text-right hidden sm:inline">
               {gridCoverSize}px
             </span>
+          </div>
+
+          {/* Grid View Settings Popover */}
+          <div className="relative">
+            <button
+              onClick={() => setShowGridOptions(!showGridOptions)}
+              className={`flex items-center space-x-1.5 px-2 py-1 rounded border text-[11px] transition ${
+                showGridOptions
+                  ? 'bg-crimson-900/50 border-crimson-600 text-white font-medium shadow-xs'
+                  : 'bg-charcoal-850/80 border-charcoal-800/80 text-zinc-300 hover:text-white hover:bg-charcoal-800'
+              }`}
+              title="Grid Display Variations & Settings"
+            >
+              <SlidersHorizontal size={12} className={showGridOptions ? 'text-crimson-400' : 'text-zinc-400'} />
+              <span className="hidden sm:inline">Tampilan Grid</span>
+            </button>
+
+            {showGridOptions && (
+              <>
+                {/* Backdrop to close on click outside */}
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowGridOptions(false)}
+                />
+
+                <div className="absolute right-0 top-full mt-1.5 w-64 bg-charcoal-900 border border-charcoal-700 rounded-lg p-3 shadow-2xl backdrop-blur-xl z-50 text-xs space-y-3">
+                  {/* Density (Rapat, Nyaman, Minimal) */}
+                  <div>
+                    <div className="text-[10px] font-mono uppercase text-zinc-400 tracking-wider mb-1.5 font-semibold">
+                      Kerapatan (Density)
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 bg-charcoal-950 p-1 rounded border border-charcoal-800 text-[11px]">
+                      <button
+                        onClick={() => setGridDensity('compact')}
+                        className={`py-1 rounded font-medium transition ${
+                          gridDensity === 'compact'
+                            ? 'bg-crimson-700 text-white shadow-xs'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Rapat
+                      </button>
+                      <button
+                        onClick={() => setGridDensity('comfortable')}
+                        className={`py-1 rounded font-medium transition ${
+                          gridDensity === 'comfortable'
+                            ? 'bg-crimson-700 text-white shadow-xs'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Nyaman
+                      </button>
+                      <button
+                        onClick={() => setGridDensity('minimal')}
+                        className={`py-1 rounded font-medium transition ${
+                          gridDensity === 'minimal'
+                            ? 'bg-crimson-700 text-white shadow-xs'
+                            : 'text-zinc-400 hover:text-zinc-200'
+                        }`}
+                      >
+                        Minimal
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Metadata Toggles */}
+                  <div className="space-y-1 pt-2 border-t border-charcoal-800">
+                    <div className="text-[10px] font-mono uppercase text-zinc-400 tracking-wider mb-1 font-semibold">
+                      Tampilkan Detail
+                    </div>
+
+                    <label className="flex items-center justify-between cursor-pointer py-1 px-1.5 rounded hover:bg-charcoal-800/60 transition">
+                      <span className="text-zinc-300 text-[11px]">Badge Kualitas (FLAC/Hi-Res)</span>
+                      <input
+                        type="checkbox"
+                        checked={showGridQualityBadge}
+                        onChange={(e) => setShowGridQualityBadge(e.target.checked)}
+                        className="rounded accent-crimson-600 cursor-pointer"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between cursor-pointer py-1 px-1.5 rounded hover:bg-charcoal-800/60 transition">
+                      <span className="text-zinc-300 text-[11px]">Jumlah Tracks</span>
+                      <input
+                        type="checkbox"
+                        checked={showGridTrackCount}
+                        onChange={(e) => setShowGridTrackCount(e.target.checked)}
+                        className="rounded accent-crimson-600 cursor-pointer"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between cursor-pointer py-1 px-1.5 rounded hover:bg-charcoal-800/60 transition">
+                      <span className="text-zinc-300 text-[11px]">Nama Artis</span>
+                      <input
+                        type="checkbox"
+                        checked={showGridArtist}
+                        onChange={(e) => setShowGridArtist(e.target.checked)}
+                        className="rounded accent-crimson-600 cursor-pointer"
+                      />
+                    </label>
+
+                    <label className="flex items-center justify-between cursor-pointer py-1 px-1.5 rounded hover:bg-charcoal-800/60 transition">
+                      <span className="text-zinc-300 text-[11px]">Tahun Rilis</span>
+                      <input
+                        type="checkbox"
+                        checked={showGridYear}
+                        onChange={(e) => setShowGridYear(e.target.checked)}
+                        className="rounded accent-crimson-600 cursor-pointer"
+                      />
+                    </label>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -492,7 +693,9 @@ export const AlbumGrid: React.FC = () => {
                   }}
                 >
                   <div
-                    className="grid gap-3 sm:gap-4 items-start"
+                    className={`grid items-start ${
+                      isCompact ? 'gap-2 sm:gap-2.5' : isMinimal ? 'gap-2.5 sm:gap-3.5' : 'gap-3 sm:gap-4'
+                    }`}
                     style={{
                       gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
                     }}
@@ -523,6 +726,15 @@ export const AlbumGrid: React.FC = () => {
           album={albumContextMenu.album}
           onViewTracks={() => {
             setModalAlbum(albumContextMenu.album);
+          }}
+          onSyncLastFm={async (album) => {
+            try {
+              await api.syncAlbumLastFm(album.id);
+              await queryClient.invalidateQueries({ queryKey: ['albumTracksModal', album.id] });
+              await queryClient.invalidateQueries({ queryKey: ['tracks'] });
+            } catch (e) {
+              console.error('Failed to sync album with Last.fm:', e);
+            }
           }}
           onClose={() => setAlbumContextMenu(null)}
         />

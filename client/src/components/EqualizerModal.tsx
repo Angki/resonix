@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sliders, X, RotateCcw, Power, Check, Radio, Volume2 } from 'lucide-react';
+import { Sliders, X, RotateCcw, Power, Check, Radio, Volume2, Headphones, Waves, Sparkles } from 'lucide-react';
 import {
   useEqualizerStore,
   EQ_FREQUENCIES_10,
@@ -9,6 +9,7 @@ import {
   EqPresetCategory,
 } from '../store/equalizerStore';
 import { useUiStore } from '../store/uiStore';
+import { useVisualizerStore, VISUALIZER_MODES } from '../store/visualizerStore';
 
 function formatFreq(f: number): string {
   if (f >= 1000) return `${f / 1000}k`;
@@ -25,8 +26,10 @@ export const EqualizerModal: React.FC = () => {
     preAmp,
     activePreset,
     isNormalizerEnabled,
+    isCrossfeedEnabled,
     toggleEnabled,
     toggleNormalizer,
+    toggleCrossfeed,
     setBandMode,
     setBandGain10,
     setBandGain5,
@@ -34,6 +37,8 @@ export const EqualizerModal: React.FC = () => {
     applyPreset,
     resetFlat,
   } = useEqualizerStore();
+
+  const { mode: visualizerMode, setMode: setVisualizerMode, setOpen: setVisualizerOpen } = useVisualizerStore();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
 
@@ -114,6 +119,19 @@ export const EqualizerModal: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-2">
+            <button
+              onClick={toggleCrossfeed}
+              title="Bauer Stereophonic-to-Binaural (bs2b) Crossfeed: Blends 700Hz low-passed channel cross-feed with 350µs delay to eliminate headphone listening fatigue from extreme stereo pans & harsh mixes."
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded text-xs font-medium transition border ${
+                isCrossfeedEnabled
+                  ? 'bg-purple-950/50 border-purple-600 text-purple-300'
+                  : 'bg-charcoal-800 border-charcoal-700 text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              <Headphones size={12} className={isCrossfeedEnabled ? 'text-purple-400' : 'text-zinc-500'} />
+              <span>{isCrossfeedEnabled ? 'CROSSFEED: ON' : 'CROSSFEED: OFF'}</span>
+            </button>
+
             <button
               onClick={toggleNormalizer}
               title="Dynamics Peak Compressor / Auto Volume Normalizer (prevents sudden ear-blasting peaks)"
@@ -389,6 +407,57 @@ export const EqualizerModal: React.FC = () => {
           </div>
         </div>
 
+        {/* Audio Visualizer Mode Controls directly inside Equalizer! */}
+        <div className="px-4 py-3 bg-charcoal-925 border-t border-charcoal-800 flex flex-col space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Waves size={15} className="text-crimson-400" />
+              <span className="font-semibold text-zinc-200 text-xs">Pilih Mode Visualisasi Audio:</span>
+              <span className="font-mono text-[11px] text-zinc-400 hidden sm:inline">
+                Mode {visualizerMode + 1}: <strong className="text-crimson-300">{VISUALIZER_MODES[visualizerMode]?.name}</strong>
+              </span>
+            </div>
+
+            <button
+              onClick={() => {
+                setEqualizerOpen(false);
+                setVisualizerOpen(true);
+              }}
+              className="flex items-center space-x-1.5 px-3 py-1 bg-crimson-800 hover:bg-crimson-700 text-white rounded-lg text-[11px] font-medium transition shadow-xs active:scale-95 cursor-pointer"
+            >
+              <Waves size={13} />
+              <span>Buka Visualizer Layar Penuh (V)</span>
+            </button>
+          </div>
+
+          {/* Quick Visualizer Mode Pills Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 max-h-36 overflow-y-auto pr-0.5 scrollbar-thin scrollbar-thumb-charcoal-700">
+            {VISUALIZER_MODES.map((m) => {
+              const isSelected = visualizerMode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => setVisualizerMode(m.id)}
+                  title={`${m.name}: ${m.description}`}
+                  className={`px-2 py-1.5 rounded-lg border text-left transition flex flex-col justify-between cursor-pointer ${
+                    isSelected
+                      ? 'bg-crimson-950/70 border-crimson-600 text-white shadow-xs ring-1 ring-crimson-500/40'
+                      : 'bg-charcoal-850/80 border-charcoal-750 text-zinc-400 hover:text-zinc-200 hover:bg-charcoal-800'
+                  }`}
+                >
+                  <span className="text-[11px] font-medium truncate w-full flex items-center gap-1">
+                    {m.id === 10 || m.id === 12 ? '🖼️ ' : m.id === 6 ? '💿 ' : m.id === 11 ? '🎤 ' : '📊 '}
+                    {m.name}
+                  </span>
+                  <span className="text-[9px] font-mono text-zinc-500 truncate">
+                    {m.tagline}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Footer */}
         <div className="px-4 py-2.5 bg-charcoal-950 border-t border-charcoal-800 flex items-center justify-between">
           <div className="flex items-center space-x-2 text-[11px] text-zinc-500">
@@ -400,6 +469,11 @@ export const EqualizerModal: React.FC = () => {
             {isNormalizerEnabled && (
               <span className="text-amber-400 font-mono text-[10px] bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-700/50">
                 • Dynamics Peak Compressor Active (-24dB, 12:1)
+              </span>
+            )}
+            {isCrossfeedEnabled && (
+              <span className="text-purple-400 font-mono text-[10px] bg-purple-950/40 px-1.5 py-0.5 rounded border border-purple-700/50">
+                • bs2b Crossfeed Active (700Hz, 350µs)
               </span>
             )}
           </div>

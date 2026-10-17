@@ -15,6 +15,10 @@ import {
   Sliders,
   Waves,
   Radio,
+  Moon,
+  PictureInPicture2,
+  Maximize2,
+  Minimize2,
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { usePlayerStore } from '../store/playerStore';
@@ -24,6 +28,8 @@ import { useVisualizerStore } from '../store/visualizerStore';
 import { audioVisualizerService } from '../services/audioVisualizerService';
 import { api } from '../api/client';
 import { PlayerContextMenu } from './PlayerContextMenu';
+import { LastFmIcon } from './LastFmIcon';
+import { isBrowserFlacSupported } from '../utils/audio';
 
 
 function formatTime(sec: number): string {
@@ -35,6 +41,7 @@ function formatTime(sec: number): string {
 
 export const PlayerBar: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
     currentTrack,
@@ -49,6 +56,10 @@ export const PlayerBar: React.FC = () => {
     queue,
     sessionId,
     forceTranscode,
+    isCrossfadeEnabled,
+    crossfadeSeconds,
+    isAutoAdvanceEnabled,
+    autoAdvanceTriggerSeconds,
     togglePlay,
     pause,
     resume,
@@ -76,6 +87,10 @@ export const PlayerBar: React.FC = () => {
     isEqualizerOpen,
     setEqualizerOpen,
     setMobileNowPlayingOpen,
+    isMiniPlayerOpen,
+    toggleMiniPlayer,
+    isFullscreen,
+    toggleFullscreen,
   } = useUiStore();
 
   const {
@@ -83,6 +98,7 @@ export const PlayerBar: React.FC = () => {
     gains: eqGains,
     preAmp: eqPreAmp,
     isNormalizerEnabled,
+    isCrossfeedEnabled,
   } = useEqualizerStore();
   const { isOpen: isVisualizerOpen, toggleOpen: toggleVisualizer } = useVisualizerStore();
 
@@ -95,14 +111,55 @@ export const PlayerBar: React.FC = () => {
 
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekValue, setSeekValue] = useState(0);
+  const [hoverSeek, setHoverSeek] = useState<{ time: number; percent: number } | null>(null);
   const [isScrobbled, setIsScrobbled] = useState(false);
   const [playerContextMenuPos, setPlayerContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Sleep Timer state
+  const [sleepTimerMinutes, setSleepTimerMinutes] = useState<number | null>(null);
+  const [sleepTimerExpiresAt, setSleepTimerExpiresAt] = useState<number | null>(null);
+  const [sleepTimerRemainingText, setSleepTimerRemainingText] = useState<string>('');
+  const [isSleepTimerMenuOpen, setIsSleepTimerMenuOpen] = useState(false);
+  const sleepTimerMinutesRef = useRef<number | null>(null);
+  sleepTimerMinutesRef.current = sleepTimerMinutes;
 
   const lastTrackIdRef = useRef<string | null>(null);
   const lastTimeRef = useRef<number>(0);
   const listenedSinceLastReportRef = useRef<number>(0);
   const isAdvancingRef = useRef<boolean>(false);
+  const isCrossfadingRef = useRef<boolean>(false);
+  const crossfadeAudioRef = useRef<HTMLAudioElement | null>(null);
+  const crossfadeTimerRef = useRef<any>(null);
+  const watchdogTimerRef = useRef<any>(null);
   const thresholdReportedRef = useRef<boolean>(false);
+
+  // Sleep Timer countdown effect
+  useEffect(() => {
+    if (!sleepTimerExpiresAt || sleepTimerMinutes === null || sleepTimerMinutes <= 0) {
+      if (sleepTimerMinutes === -1) {
+        setSleepTimerRemainingText('End');
+      } else {
+        setSleepTimerRemainingText('');
+      }
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const remainingMs = sleepTimerExpiresAt - Date.now();
+      if (remainingMs <= 0) {
+        console.log('[PlayerBar] Sleep timer expired: pausing playback');
+        pause();
+        setSleepTimerMinutes(null);
+        setSleepTimerExpiresAt(null);
+        setSleepTimerRemainingText('');
+      } else {
+        const remainingMin = Math.ceil(remainingMs / 60000);
+        setSleepTimerRemainingText(`${remainingMin}m`);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [sleepTimerExpiresAt, sleepTimerMinutes, pause]);
 
   // Reliable flush on tab close/unload
   useEffect(() => {
@@ -126,12 +183,50 @@ export const PlayerBar: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
+  // Resilient background watchdog timer for Tailscale streaming
+  useEffect(() => {
+    if (watchdogTimerRef.current) {
+      clearTimeout(watchdogTimerRef.current);
+      watchdogTimerRef.current = null;
+    }
+
+    if (!isPlaying || !currentTrack) return;
+
+    const effDur =
+      audioRef.current?.duration && isFinite(audioRef.current.duration) && audioRef.current.duration > 0
+        ? audioRef.current.duration
+        : currentTrack.duration || 0;
+
+    if (effDur > 0) {
+      const cur = audioRef.current?.currentTime || currentTime || 0;
+      const remainingSec = Math.max(1, effDur - cur);
+      // Give 2.5s buffer past expected end of track; if still hasn't advanced, force advance
+      const timeoutMs = (remainingSec + 2.5) * 1000;
+      watchdogTimerRef.current = setTimeout(() => {
+        if (usePlayerStore.getState().isPlaying && !isAdvancingRef.current && !isCrossfadingRef.current) {
+          console.log('[PlayerBar] Fallback watchdog timer triggered end-of-track advance');
+          handleEnded();
+        }
+      }, timeoutMs);
+    }
+
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+  }, [currentTrack?.id, isPlaying, isCrossfadeEnabled, crossfadeSeconds, autoAdvanceTriggerSeconds]);
+
   // Web Audio API equalizer, normalizer & visualizer nodes
   const audioCtxRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const preAmpGainRef = useRef<GainNode | null>(null);
   const filtersRef = useRef<BiquadFilterNode[]>([]);
   const compressorRef = useRef<DynamicsCompressorNode | null>(null);
+  const makeUpGainRef = useRef<GainNode | null>(null);
+  const crossfeedWetGainRef = useRef<GainNode | null>(null);
+  const crossfeedDryGainRef = useRef<GainNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
 
   // Setup Web Audio API filter chain, compressor & analyser node
@@ -186,6 +281,11 @@ export const PlayerBar: React.FC = () => {
             }
             compressorRef.current = compressor;
 
+            // Make-up gain node to compensate for compression attenuation
+            const makeUpGain = ctx.createGain();
+            makeUpGain.gain.value = initialNorm ? 1.45 : 1.0;
+            makeUpGainRef.current = makeUpGain;
+
             // Analyser node for visualizer (512 fftSize, 0.8 smoothing)
             const analyser = ctx.createAnalyser();
             analyser.fftSize = 512;
@@ -193,7 +293,7 @@ export const PlayerBar: React.FC = () => {
             analyserRef.current = analyser;
             audioVisualizerService.setAnalyser(analyser);
 
-            // Chain: src -> preAmp -> filter[0] -> ... -> filter[9] -> compressor -> analyser -> destination
+            // Chain: src -> preAmp -> filter[0] -> ... -> filter[9] -> compressor -> makeUpGain -> analyser -> destination
             let prevNode: AudioNode = srcNode;
             prevNode.connect(preAmpNode);
             prevNode = preAmpNode;
@@ -203,9 +303,66 @@ export const PlayerBar: React.FC = () => {
               prevNode = f;
             });
 
-            prevNode.connect(compressor);
-            compressor.connect(analyser);
+            // Headphone Crossfeed (bs2b - Bauer stereophonic-to-binaural DSP simulation)
+            const splitter = ctx.createChannelSplitter(2);
+            const merger = ctx.createChannelMerger(2);
+
+            const directGainL = ctx.createGain();
+            directGainL.gain.value = 0.9;
+            const directGainR = ctx.createGain();
+            directGainR.gain.value = 0.9;
+
+            splitter.connect(directGainL, 0);
+            directGainL.connect(merger, 0, 0);
+
+            splitter.connect(directGainR, 1);
+            directGainR.connect(merger, 0, 1);
+
+            // Left -> Right crossfeed (700Hz lowpass, 350µs delay, 0.35 gain)
+            const crossFilterL = ctx.createBiquadFilter();
+            crossFilterL.type = 'lowpass';
+            crossFilterL.frequency.value = 700;
+            const crossDelayL = ctx.createDelay();
+            crossDelayL.delayTime.value = 0.00035;
+            const crossGainL = ctx.createGain();
+            crossGainL.gain.value = 0.35;
+
+            splitter.connect(crossFilterL, 0);
+            crossFilterL.connect(crossDelayL);
+            crossDelayL.connect(crossGainL);
+            crossGainL.connect(merger, 0, 1);
+
+            // Right -> Left crossfeed (700Hz lowpass, 350µs delay, 0.35 gain)
+            const crossFilterR = ctx.createBiquadFilter();
+            crossFilterR.type = 'lowpass';
+            crossFilterR.frequency.value = 700;
+            const crossDelayR = ctx.createDelay();
+            crossDelayR.delayTime.value = 0.00035;
+            const crossGainR = ctx.createGain();
+            crossGainR.gain.value = 0.35;
+
+            splitter.connect(crossFilterR, 1);
+            crossFilterR.connect(crossDelayR);
+            crossDelayR.connect(crossGainR);
+            crossGainR.connect(merger, 0, 0);
+
+            const crossfeedWet = ctx.createGain();
+            const crossfeedDry = ctx.createGain();
+
+            const initialCrossfeed = useEqualizerStore.getState().isCrossfeedEnabled;
+            crossfeedDry.gain.value = initialCrossfeed ? 0.0 : 1.0;
+            crossfeedWet.gain.value = initialCrossfeed ? 1.0 : 0.0;
+
+            makeUpGain.connect(crossfeedDry);
+            makeUpGain.connect(splitter);
+            merger.connect(crossfeedWet);
+
+            crossfeedDry.connect(analyser);
+            crossfeedWet.connect(analyser);
             analyser.connect(ctx.destination);
+
+            crossfeedDryGainRef.current = crossfeedDry;
+            crossfeedWetGainRef.current = crossfeedWet;
             filtersRef.current = filters;
           }
         } catch (e) {
@@ -244,10 +401,11 @@ export const PlayerBar: React.FC = () => {
     }
   }, [isEqEnabled, eqPreAmp]);
 
-  // Update Dynamics Compressor (Volume Normalizer)
+  // Update Dynamics Compressor (Volume Normalizer) with Make-Up Gain
   useEffect(() => {
     const ctx = audioCtxRef.current;
     const comp = compressorRef.current;
+    const makeUp = makeUpGainRef.current;
     if (!ctx || !comp) return;
 
     const t = ctx.currentTime;
@@ -258,10 +416,12 @@ export const PlayerBar: React.FC = () => {
         comp.knee.setTargetAtTime(30, t, 0.05);
         comp.attack.setTargetAtTime(0.003, t, 0.05);
         comp.release.setTargetAtTime(0.25, t, 0.05);
+        if (makeUp) makeUp.gain.setTargetAtTime(1.45, t, 0.05);
       } else {
         comp.threshold.setTargetAtTime(0, t, 0.05);
         comp.ratio.setTargetAtTime(1, t, 0.05);
         comp.knee.setTargetAtTime(0, t, 0.05);
+        if (makeUp) makeUp.gain.setTargetAtTime(1.0, t, 0.05);
       }
     } catch {
       if (isNormalizerEnabled) {
@@ -270,19 +430,59 @@ export const PlayerBar: React.FC = () => {
         comp.knee.value = 30;
         comp.attack.value = 0.003;
         comp.release.value = 0.25;
+        if (makeUp) makeUp.gain.value = 1.45;
       } else {
         comp.threshold.value = 0;
         comp.ratio.value = 1;
         comp.knee.value = 0;
+        if (makeUp) makeUp.gain.value = 1.0;
       }
     }
   }, [isNormalizerEnabled]);
 
+  // Update Crossfeed wet/dry mix
+  useEffect(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx || !crossfeedDryGainRef.current || !crossfeedWetGainRef.current) return;
+    const targetWet = isCrossfeedEnabled ? 1.0 : 0.0;
+    const targetDry = isCrossfeedEnabled ? 0.0 : 1.0;
+    try {
+      crossfeedWetGainRef.current.gain.setTargetAtTime(targetWet, ctx.currentTime, 0.03);
+      crossfeedDryGainRef.current.gain.setTargetAtTime(targetDry, ctx.currentTime, 0.03);
+    } catch {
+      crossfeedWetGainRef.current.gain.value = targetWet;
+      crossfeedDryGainRef.current.gain.value = targetDry;
+    }
+  }, [isCrossfeedEnabled]);
+
+  // Gapless Audio Preloader: Pre-buffer next track in invisible audio element
+  useEffect(() => {
+    if (!currentTrack || queue.length === 0 || !preloadAudioRef.current) return;
+
+    const currentIndex = queue.findIndex((t) => t.id === currentTrack.id);
+    let nextTrack: any = null;
+    if (currentIndex >= 0 && currentIndex < queue.length - 1) {
+      nextTrack = queue[currentIndex + 1];
+    } else if (repeatMode === 'all' && queue.length > 0) {
+      nextTrack = queue[0];
+    }
+
+    if (nextTrack) {
+      const nextUrl = api.getStreamUrl(nextTrack.id, forceTranscode);
+      if (preloadAudioRef.current.src !== nextUrl) {
+        preloadAudioRef.current.src = nextUrl;
+        preloadAudioRef.current.load();
+      }
+    }
+  }, [currentTrack?.id, queue, repeatMode, forceTranscode]);
 
   // Sync audio element with currentTrack
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
+
+    const isFlacNative = isBrowserFlacSupported();
+    const shouldTranscode = forceTranscode || (Boolean(currentTrack.isLossless) && !isFlacNative);
 
     if (lastTrackIdRef.current !== currentTrack.id) {
       // Flush outgoing track listening progress before switching
@@ -305,6 +505,11 @@ export const PlayerBar: React.FC = () => {
       setIsScrobbled(false);
       resetListenedSeconds();
 
+      // If browser cannot play FLAC natively, ensure forceTranscode stays true
+      if (!isFlacNative && currentTrack.isLossless) {
+        setForceTranscode(true);
+      }
+
       // Resume audio context if suspended
       if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
         audioCtxRef.current.resume().catch(() => {});
@@ -317,7 +522,7 @@ export const PlayerBar: React.FC = () => {
         console.error('Failed to start playback session:', err);
       });
 
-      const streamUrl = api.getStreamUrl(currentTrack.id, forceTranscode);
+      const streamUrl = api.getStreamUrl(currentTrack.id, shouldTranscode);
       audio.src = streamUrl;
 
       if (isPlaying) {
@@ -331,8 +536,31 @@ export const PlayerBar: React.FC = () => {
           });
         }
       }
+    } else {
+      // Same track ID: check if forceTranscode toggled or fallback was activated
+      const expectedUrl = api.getStreamUrl(currentTrack.id, shouldTranscode);
+      const currentSrc = audio.src || '';
+      // Compare pathname to see if stream endpoint changed (/transcode vs direct)
+      try {
+        const currentPath = currentSrc ? new URL(currentSrc, window.location.origin).pathname : '';
+        const expectedPath = new URL(expectedUrl, window.location.origin).pathname;
+        if (currentPath !== expectedPath) {
+          console.log(`[PlayerBar] Stream source changed (${currentPath} -> ${expectedPath}), reloading audio...`);
+          const pos = audio.currentTime || 0;
+          audio.src = expectedUrl;
+          audio.load();
+          if (pos > 0) {
+            audio.currentTime = pos;
+          }
+          if (isPlaying) {
+            audio.play().catch(err => console.warn('Play reload error:', err));
+          }
+        }
+      } catch (err) {
+        console.warn('[PlayerBar] URL check error:', err);
+      }
     }
-  }, [currentTrack, forceTranscode, isPlaying, resetListenedSeconds, setSessionId]);
+  }, [currentTrack, forceTranscode, isPlaying, resetListenedSeconds, setSessionId, setForceTranscode]);
 
   // Sync isPlaying state changes
   useEffect(() => {
@@ -484,21 +712,53 @@ export const PlayerBar: React.FC = () => {
       }
     }
 
-    // Near-end watchdog: HTML5 audio streaming over HTTP 206 sometimes stalls or misses onended
-    // when duration metadata has a floating-point delta with decoded stream samples.
-    // Trigger auto-advance reliably when within 0.75s of actual audio duration while still actively playing.
-    const actualDur = audio.duration;
+    // Pre-buffer next track when remaining playback time <= 15 seconds
+    const effDurationForWatchdog =
+      audio.duration && isFinite(audio.duration) && audio.duration > 0
+        ? audio.duration
+        : currentTrack.duration && currentTrack.duration > 0
+        ? currentTrack.duration
+        : 0;
+
+    if (effDurationForWatchdog > 15 && cur >= effDurationForWatchdog - 15) {
+      const { queue, queueIndex, isShuffle } = usePlayerStore.getState();
+      if (queue.length > 1) {
+        let nIdx = queueIndex + 1;
+        if (!isShuffle && nIdx < queue.length) {
+          const nextTrackToPreload = queue[nIdx];
+          if (nextTrackToPreload && preloadAudioRef.current) {
+            if (preloadAudioRef.current.dataset.preloadTrackId !== nextTrackToPreload.id) {
+              preloadAudioRef.current.dataset.preloadTrackId = nextTrackToPreload.id;
+              preloadAudioRef.current.src = api.getStreamUrl(nextTrackToPreload.id, false);
+              preloadAudioRef.current.load();
+              console.log(`[PlayerBar] Pre-buffering next track: "${nextTrackToPreload.title}"`);
+            }
+          }
+        }
+      }
+    }
+
+    // Tailscale Auto-Advance Watchdog & Dual-Audio Crossfade Trigger
     if (
-      actualDur &&
-      isFinite(actualDur) &&
-      actualDur > 2 &&
-      cur >= actualDur - 0.75 &&
-      !audio.paused &&
+      isAutoAdvanceEnabled &&
+      effDurationForWatchdog > 2 &&
       !isSeeking &&
-      !isAdvancingRef.current
+      !isAdvancingRef.current &&
+      !isCrossfadingRef.current
     ) {
-      console.log(`[PlayerBar] Near-end watchdog auto-advancing at ${cur.toFixed(1)}s / ${actualDur.toFixed(1)}s`);
-      handleEnded();
+      if (isCrossfadeEnabled && effDurationForWatchdog > (crossfadeSeconds || 3) + 2) {
+        const xfSec = Math.max(1, crossfadeSeconds || 3);
+        if (cur >= effDurationForWatchdog - xfSec) {
+          console.log(`[PlayerBar] Dual-Audio Crossfade triggered at ${cur.toFixed(1)}s / ${effDurationForWatchdog.toFixed(1)}s (window: ${xfSec}s)`);
+          startCrossfade();
+        }
+      } else {
+        const triggerSec = Math.max(0.5, autoAdvanceTriggerSeconds || 1.5);
+        if (cur >= effDurationForWatchdog - triggerSec) {
+          console.log(`[PlayerBar] Near-end watchdog auto-advancing at ${cur.toFixed(1)}s / ${effDurationForWatchdog.toFixed(1)}s (trigger: ${triggerSec}s)`);
+          handleEnded();
+        }
+      }
     }
   };
 
@@ -512,6 +772,135 @@ export const PlayerBar: React.FC = () => {
     } catch {
       // ignore
     }
+  };
+
+  const startCrossfade = () => {
+    if (isCrossfadingRef.current || isAdvancingRef.current) return;
+    const { queue, queueIndex, isShuffle, repeatMode: rMode, volume: baseVol, isMuted: muted } = usePlayerStore.getState();
+    if (queue.length === 0) return;
+
+    let currentIndex = queueIndex;
+    if (currentTrack) {
+      const actualIdx = queue.findIndex(t => t.id === currentTrack.id);
+      if (actualIdx !== -1) currentIndex = actualIdx;
+    }
+
+    let nextIndex = currentIndex + 1;
+    if (isShuffle) {
+      if (queue.length > 1) {
+        let rand = Math.floor(Math.random() * queue.length);
+        if (rand === currentIndex) rand = (rand + 1) % queue.length;
+        nextIndex = rand;
+      } else {
+        nextIndex = 0;
+      }
+    } else if (nextIndex >= queue.length) {
+      if (rMode === 'all') {
+        nextIndex = 0;
+      } else {
+        return;
+      }
+    }
+
+    const nextTrack = queue[nextIndex];
+    const curAudio = audioRef.current;
+    const xAudio = crossfadeAudioRef.current;
+    if (!nextTrack || !curAudio || !xAudio) {
+      handleEnded();
+      return;
+    }
+
+    isCrossfadingRef.current = true;
+    const xfSec = Math.max(1, crossfadeSeconds || 3);
+    console.log(`[PlayerBar] Starting dual-audio crossfade to: "${nextTrack.title}" (${xfSec}s)`);
+
+    const targetVol = muted ? 0 : baseVol;
+    xAudio.src = api.getStreamUrl(nextTrack.id, false);
+    xAudio.volume = 0;
+    xAudio.currentTime = 0;
+
+    const playPromise = xAudio.play();
+    if (playPromise) {
+      playPromise.catch(err => {
+        console.warn('[PlayerBar] Crossfade secondary audio play failed:', err);
+      });
+    }
+
+    // Step every 50ms over total duration
+    const totalDurationMs = xfSec * 1000;
+    const stepIntervalMs = 50;
+    const totalSteps = totalDurationMs / stepIntervalMs;
+    let step = 0;
+
+    if (crossfadeTimerRef.current) clearInterval(crossfadeTimerRef.current);
+
+    crossfadeTimerRef.current = setInterval(() => {
+      step++;
+      const progress = Math.min(1, step / totalSteps);
+
+      // Equal-power crossfade curve: cos for fade-out, sin for fade-in
+      const fadeOutGain = Math.cos(progress * 0.5 * Math.PI);
+      const fadeInGain = Math.sin(progress * 0.5 * Math.PI);
+
+      if (curAudio) curAudio.volume = Math.max(0, targetVol * fadeOutGain);
+      if (xAudio) xAudio.volume = Math.min(targetVol, targetVol * fadeInGain);
+
+      if (progress >= 1) {
+        if (crossfadeTimerRef.current) clearInterval(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+
+        // Finalize crossfade switch
+        curAudio.pause();
+        curAudio.src = '';
+        curAudio.volume = targetVol;
+
+        lastTrackIdRef.current = nextTrack.id;
+        lastTimeRef.current = 0;
+        listenedSinceLastReportRef.current = 0;
+        thresholdReportedRef.current = false;
+        setIsScrobbled(false);
+        resetListenedSeconds();
+
+        if ('mediaSession' in navigator) {
+          const artworkUrl = api.getTrackArtworkUrl(nextTrack.id, 512);
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: nextTrack.title,
+            artist: nextTrack.artistName,
+            album: nextTrack.albumTitle || 'Unknown Album',
+            artwork: [
+              { src: artworkUrl, sizes: '512x512', type: 'image/webp' },
+              { src: artworkUrl, sizes: '256x256', type: 'image/webp' },
+            ],
+          });
+          navigator.mediaSession.playbackState = 'playing';
+        }
+
+        const currentNextPos = xAudio.currentTime;
+        curAudio.src = api.getStreamUrl(nextTrack.id, false);
+        curAudio.currentTime = currentNextPos;
+        curAudio.play().then(() => {
+          xAudio.pause();
+          xAudio.src = '';
+          isCrossfadingRef.current = false;
+        }).catch(() => {
+          isCrossfadingRef.current = false;
+        });
+
+        usePlayerStore.setState({
+          queueIndex: nextIndex,
+          currentTrack: nextTrack,
+          isPlaying: true,
+          currentTime: currentNextPos,
+          duration: nextTrack.duration,
+          sessionId: null,
+          listenedSeconds: 0,
+        });
+
+        api.startPlayback(nextTrack.id).then((res) => {
+          setSessionId(res.sessionId);
+        }).catch(err => console.error('Failed to start playback session:', err));
+      }
+    }, stepIntervalMs);
   };
 
   const handleEnded = () => {
@@ -533,6 +922,16 @@ export const PlayerBar: React.FC = () => {
         listenedSeconds: currentListened,
         eventId: crypto.randomUUID(),
       }).catch(e => console.warn('Final progress report failed:', e));
+    }
+
+    // Sleep Timer End-of-Track check
+    if (sleepTimerMinutesRef.current === -1) {
+      console.log('[PlayerBar] Sleep timer triggered: stopping playback at end of track');
+      pause();
+      setSleepTimerMinutes(null);
+      setSleepTimerExpiresAt(null);
+      setSleepTimerRemainingText('');
+      return;
     }
 
     if (repeatMode === 'one') {
@@ -589,17 +988,48 @@ export const PlayerBar: React.FC = () => {
       thresholdReportedRef.current = false;
       setIsScrobbled(false);
       resetListenedSeconds();
+      setForceTranscode(false);
 
-      const streamUrl = api.getStreamUrl(nextTrack.id, forceTranscode);
-      audio.src = streamUrl;
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          if (err.name !== 'AbortError') {
-            console.warn('[PlayerBar] Background auto-advance play error:', err);
-          }
-        });
+      // Resume AudioContext if suspended
+      if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+        audioCtxRef.current.resume().catch(() => {});
       }
+
+      const streamUrl = api.getStreamUrl(nextTrack.id, false);
+      audio.src = streamUrl;
+
+      const attemptPlay = () => {
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume().catch(() => {});
+        }
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('[PlayerBar] Background auto-advance play error:', err);
+            if (err.name === 'NotAllowedError') {
+              // Browser autoplay policy blocked playback in inactive tab/window
+              const resumePlayback = () => {
+                if (audioRef.current && audioRef.current.paused) {
+                  audioRef.current.play().catch(() => {});
+                }
+                window.removeEventListener('click', resumePlayback);
+                window.removeEventListener('keydown', resumePlayback);
+                document.removeEventListener('visibilitychange', onVisibilityChange);
+              };
+              const onVisibilityChange = () => {
+                if (document.visibilityState === 'visible') {
+                  resumePlayback();
+                }
+              };
+              window.addEventListener('click', resumePlayback, { once: true });
+              window.addEventListener('keydown', resumePlayback, { once: true });
+              document.addEventListener('visibilitychange', onVisibilityChange);
+            }
+          });
+        }
+      };
+
+      attemptPlay();
 
       // 2. Synchronously refresh MediaSession metadata to retain browser notification controls
       if ('mediaSession' in navigator) {
@@ -662,9 +1092,10 @@ export const PlayerBar: React.FC = () => {
   const scrobblePercent = scrobbleThreshold > 0 ? Math.min(100, Math.round((listenedSeconds / scrobbleThreshold) * 100)) : 0;
 
   return (
-    <footer className="bg-charcoal-950 border-t border-charcoal-750 flex flex-col sm:flex-row sm:items-center sm:justify-between px-2 sm:px-3 select-none shrink-0 relative z-40 text-xs">
+    <footer className="bg-charcoal-950/95 backdrop-blur-xl border-t border-charcoal-750/90 flex flex-col sm:flex-row sm:items-center sm:justify-between px-2 sm:px-3 select-none shrink-0 relative z-40 text-xs shadow-2xl">
       <audio
         ref={audioRef}
+        crossOrigin="anonymous"
         onTimeUpdate={handleTimeUpdate}
         onProgress={handleProgress}
         onDurationChange={() => {
@@ -678,27 +1109,77 @@ export const PlayerBar: React.FC = () => {
         }}
         onPause={() => {
           const audio = audioRef.current;
-          if (audio && currentTrack && !isSeeking && !isAdvancingRef.current) {
-            const actualDur = audio.duration;
-            if (audio.ended || (actualDur && isFinite(actualDur) && actualDur > 2 && audio.currentTime >= actualDur - 0.75)) {
+          if (audio && currentTrack && !isSeeking && !isAdvancingRef.current && !isCrossfadingRef.current) {
+            const effDur =
+              audio.duration && isFinite(audio.duration) && audio.duration > 0
+                ? audio.duration
+                : currentTrack.duration || 0;
+            const threshold = Math.max(autoAdvanceTriggerSeconds || 1.5, 2.0);
+            if (
+              audio.ended ||
+              (effDur > 2 && (audio.currentTime >= effDur - threshold || audio.currentTime >= effDur * 0.985))
+            ) {
               console.log(`[PlayerBar] EOF pause detected at ${audio.currentTime.toFixed(1)}s -> handleEnded()`);
               handleEnded();
             }
           }
         }}
+        onWaiting={() => {
+          const audio = audioRef.current;
+          if (audio && currentTrack && !isSeeking && !isAdvancingRef.current && !isCrossfadingRef.current) {
+            const effDur =
+              audio.duration && isFinite(audio.duration) && audio.duration > 0
+                ? audio.duration
+                : currentTrack.duration || 0;
+            const threshold = Math.max(autoAdvanceTriggerSeconds || 1.5, 1.5);
+            if (effDur > 2 && audio.currentTime >= effDur - threshold) {
+              console.log(`[PlayerBar] Stalled near EOF at ${audio.currentTime.toFixed(1)}s -> handleEnded()`);
+              handleEnded();
+            }
+          }
+        }}
+        onStalled={() => {
+          const audio = audioRef.current;
+          if (audio && currentTrack && !isSeeking && !isAdvancingRef.current && !isCrossfadingRef.current) {
+            const effDur =
+              audio.duration && isFinite(audio.duration) && audio.duration > 0
+                ? audio.duration
+                : currentTrack.duration || 0;
+            const threshold = Math.max(autoAdvanceTriggerSeconds || 1.5, 1.5);
+            if (effDur > 2 && audio.currentTime >= effDur - threshold) {
+              console.log(`[PlayerBar] Stream stalled near EOF at ${audio.currentTime.toFixed(1)}s -> handleEnded()`);
+              handleEnded();
+            }
+          }
+        }}
         onError={(e) => {
-          console.warn('Audio element error:', e);
+          console.warn('[PlayerBar] Audio element error:', e);
+          const audio = audioRef.current;
           if (!forceTranscode && currentTrack) {
-            console.log('Direct playback failed, switching to transcode fallback...');
+            console.log('[PlayerBar] Direct playback failed, automatically falling back to transcode stream...');
             setForceTranscode(true);
+            if (audio) {
+              const transcodeUrl = api.getStreamUrl(currentTrack.id, true);
+              const pos = audio.currentTime || 0;
+              audio.src = transcodeUrl;
+              audio.load();
+              if (pos > 0) audio.currentTime = pos;
+              if (isPlaying) {
+                audio.play().catch(err => console.warn('[PlayerBar] Transcode autoplay error:', err));
+              }
+            }
           } else {
-            console.warn('Track unplayable or stream interrupted, auto-advancing to next track in queue...');
+            console.warn('[PlayerBar] Track unplayable or stream interrupted, auto-advancing to next track in queue...');
             setTimeout(() => {
               handleEnded();
-            }, 1000);
+            }, 1200);
           }
         }}
       />
+      {/* Invisible secondary preloader audio element for gapless pre-buffering */}
+      <audio ref={preloadAudioRef} preload="auto" muted style={{ display: 'none' }} />
+      {/* Secondary audio element for seamless dual-audio crossfade */}
+      <audio ref={crossfadeAudioRef} crossOrigin="anonymous" preload="auto" style={{ display: 'none' }} />
 
       {/* Mobile Top Edge: Scrub bar with explicit time display */}
       <div className="sm:hidden px-2 pt-1.5 pb-0.5 flex flex-col w-full bg-charcoal-950/95 border-b border-charcoal-850/60">
@@ -760,11 +1241,11 @@ export const PlayerBar: React.FC = () => {
         >
           {currentTrack ? (
             <>
-              <div className="w-9 h-9 sm:w-10 sm:h-10 rounded bg-charcoal-900 border border-charcoal-800 overflow-hidden shrink-0 relative">
+              <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg bg-charcoal-900 border border-charcoal-750/90 overflow-hidden shrink-0 relative shadow-md group-hover/mobiletrack:border-crimson-500/50 transition">
                 <img
                   src={trackArtUrl}
                   alt={currentTrack.title}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover/mobiletrack:scale-105"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = '/api/artwork/unknown';
                   }}
@@ -782,26 +1263,27 @@ export const PlayerBar: React.FC = () => {
                     <div className="shrink-0 flex items-center ml-1">
                       {isScrobbled ? (
                         <span
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono font-semibold bg-red-950/60 text-red-400 border border-red-750/60 shadow-sm"
-                          title="✓ Track scrobbled to Last.fm"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono font-bold bg-red-950/60 text-red-400 border border-red-750/60 shadow-sm"
+                          title={`✓ Track scrobbled to Last.fm (${lastFmStatus.username})`}
                         >
-                          <Radio size={8} className="text-red-500 animate-pulse" />
-                          <span>SCROBBLED</span>
+                          <LastFmIcon size={10} className="text-[#D51007]" />
+                          <span className="text-emerald-400 font-bold">✓</span>
                         </span>
                       ) : !isScrobbleEligible ? (
                         <span
-                          className="inline-flex items-center px-1.5 py-0.5 rounded text-[8.5px] font-mono text-zinc-500 bg-charcoal-900 border border-charcoal-800"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-zinc-500 bg-charcoal-900 border border-charcoal-800"
                           title="Track <30s (ineligible for Last.fm scrobble)"
                         >
-                          &lt;30s
+                          <LastFmIcon size={9} className="text-zinc-600" />
+                          <span>&lt;30s</span>
                         </span>
                       ) : (
                         <span
                           className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8.5px] font-mono text-zinc-400 bg-charcoal-900 border border-charcoal-800"
                           title={`Scrobbles to Last.fm at 50% (${remainingScrobbleSec}s remaining • ${scrobblePercent}%)`}
                         >
-                          <Radio size={8} className="text-zinc-500" />
-                          <span>{remainingScrobbleSec}s</span>
+                          <LastFmIcon size={10} className="text-zinc-400 opacity-80" />
+                          <span>⏳ {remainingScrobbleSec}s</span>
                         </span>
                       )}
                     </div>
@@ -922,10 +1404,10 @@ export const PlayerBar: React.FC = () => {
 
             <button
               onClick={togglePlay}
-              title={isPlaying ? 'Pause' : 'Play'}
-              className="p-2.5 rounded-full bg-crimson-700 hover:bg-crimson-600 text-white shadow-lg transition active:scale-95"
+              title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              className="p-3 rounded-full bg-crimson-600 hover:bg-crimson-500 text-white shadow-lg shadow-crimson-900/40 transition-all hover:scale-105 active:scale-95 flex items-center justify-center cursor-pointer"
             >
-              {isPlaying ? <Pause size={15} className="fill-white" /> : <Play size={15} className="fill-white translate-x-0.5" />}
+              {isPlaying ? <Pause size={16} className="fill-white" /> : <Play size={16} className="fill-white translate-x-0.5" />}
             </button>
 
             <button
@@ -949,7 +1431,27 @@ export const PlayerBar: React.FC = () => {
           <div className="flex w-full items-center space-x-2 text-[10.5px] font-mono text-zinc-400">
             <span className="w-9 text-right">{formatTime(currentPos)}</span>
 
-            <div className="relative flex-1 flex items-center h-4 cursor-pointer group">
+            <div
+              onMouseMove={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect();
+                if (rect.width > 0 && effectiveDuration > 0) {
+                  const offsetX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+                  const percent = (offsetX / rect.width) * 100;
+                  const time = (offsetX / rect.width) * effectiveDuration;
+                  setHoverSeek({ time, percent });
+                }
+              }}
+              onMouseLeave={() => setHoverSeek(null)}
+              className="relative flex-1 flex items-center h-4 cursor-pointer group"
+            >
+              {hoverSeek !== null && (
+                <div
+                  style={{ left: `${hoverSeek.percent}%` }}
+                  className="absolute -top-7 -translate-x-1/2 bg-charcoal-850 text-white font-mono text-[9.5px] px-1.5 py-0.5 rounded border border-charcoal-700 shadow-md pointer-events-none z-30 whitespace-nowrap"
+                >
+                  {formatTime(hoverSeek.time)}
+                </div>
+              )}
               <div className="w-full h-1 bg-charcoal-800 rounded-full overflow-hidden relative">
                 <div
                   style={{ width: `${bufferedPercent}%` }}
@@ -1003,19 +1505,19 @@ export const PlayerBar: React.FC = () => {
             <div className="hidden lg:flex items-center">
               {isScrobbled ? (
                 <div
-                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-red-950/40 text-red-400 border border-red-800/60 shadow-sm"
-                  title={`Track scrobbled to Last.fm (${lastFmStatus.username})`}
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-red-950/40 text-red-400 border border-red-800/60 shadow-sm cursor-default"
+                  title={`✓ Track scrobbled to Last.fm (${lastFmStatus.username})`}
                 >
-                  <Radio size={9} className="text-red-500 animate-pulse" />
-                  <span>LAST.FM SCROBBLED</span>
+                  <LastFmIcon size={12} className="text-[#D51007]" />
+                  <span className="text-emerald-400 font-bold text-xs leading-none">✓</span>
                 </div>
               ) : isScrobbleEligible ? (
                 <div
-                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-charcoal-850 text-zinc-400 border border-charcoal-750"
+                  className="flex items-center gap-1.5 px-2 py-0.5 rounded font-mono text-[9px] bg-charcoal-850 text-zinc-400 border border-charcoal-750 cursor-default"
                   title={`Scrobbles to Last.fm at 50% (${remainingScrobbleSec}s remaining • ${scrobblePercent}%)`}
                 >
-                  <Radio size={9} className="text-zinc-500" />
-                  <span>SCROBBLE: {remainingScrobbleSec}s</span>
+                  <LastFmIcon size={12} className="text-zinc-400 opacity-80" />
+                  <span>⏳ {remainingScrobbleSec}s</span>
                 </div>
               ) : null}
             </div>
@@ -1044,24 +1546,143 @@ export const PlayerBar: React.FC = () => {
           <button
             onClick={() => setEqualizerOpen(!isEqualizerOpen)}
             title="Parametric Graphic Equalizer"
-            className={`p-2 rounded transition ${
-              isEqualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            className={`p-2 rounded-lg transition relative ${
+              isEqualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800 hover:text-zinc-200'
             }`}
           >
             <Sliders size={16} />
+            {isEqEnabled && (
+              <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-crimson-400 animate-pulse" title="Equalizer active" />
+            )}
           </button>
 
           {/* Audio Visualizer Toggle Button */}
           <button
             onClick={toggleVisualizer}
             title="Audio Visualizer (V)"
-            className={`p-2 rounded transition ${
-              isVisualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            className={`p-2 rounded-lg transition ${
+              isVisualizerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800 hover:text-zinc-200'
             }`}
           >
             <Waves size={16} />
           </button>
 
+          {/* Sleep Timer */}
+          <div className="relative">
+            <button
+              onClick={() => setIsSleepTimerMenuOpen(!isSleepTimerMenuOpen)}
+              title={
+                sleepTimerMinutes
+                  ? `Sleep Timer: ${sleepTimerRemainingText || 'Active'}`
+                  : 'Sleep Timer (Pengatur Waktu Tidur)'
+              }
+              className={`p-2 rounded transition flex items-center space-x-1 ${
+                sleepTimerMinutes !== null
+                  ? 'text-purple-400 bg-purple-950/50 border border-purple-800/70 shadow-xs'
+                  : 'text-zinc-400 hover:bg-charcoal-800'
+              }`}
+            >
+              <Moon size={16} className={sleepTimerMinutes !== null ? 'fill-purple-400/20' : ''} />
+              {sleepTimerRemainingText && (
+                <span className="font-mono text-[9px] text-purple-300 font-bold ml-0.5">
+                  {sleepTimerRemainingText}
+                </span>
+              )}
+            </button>
+
+            {isSleepTimerMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-40"
+                  onClick={() => setIsSleepTimerMenuOpen(false)}
+                />
+                <div className="absolute right-0 bottom-full mb-2 w-48 bg-charcoal-900 border border-charcoal-750 rounded-lg p-1.5 shadow-2xl backdrop-blur-xl z-50 text-xs space-y-1">
+                  <div className="px-2 py-1 text-[10px] font-mono uppercase text-zinc-400 tracking-wider font-semibold border-b border-charcoal-800">
+                    Sleep Timer
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setSleepTimerMinutes(null);
+                      setSleepTimerExpiresAt(null);
+                      setSleepTimerRemainingText('');
+                      setIsSleepTimerMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded transition ${
+                      sleepTimerMinutes === null
+                        ? 'bg-charcoal-800 text-white font-medium'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-charcoal-850'
+                    }`}
+                  >
+                    Off (Disabled)
+                  </button>
+
+                  {[15, 30, 45, 60].map((mins) => (
+                    <button
+                      key={mins}
+                      onClick={() => {
+                        setSleepTimerMinutes(mins);
+                        setSleepTimerExpiresAt(Date.now() + mins * 60 * 1000);
+                        setSleepTimerRemainingText(`${mins}m`);
+                        setIsSleepTimerMenuOpen(false);
+                      }}
+                      className={`w-full text-left px-2 py-1.5 rounded transition flex items-center justify-between ${
+                        sleepTimerMinutes === mins
+                          ? 'bg-purple-950/60 text-purple-300 font-medium'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-charcoal-850'
+                      }`}
+                    >
+                      <span>{mins} Menit</span>
+                      {sleepTimerMinutes === mins && (
+                        <span className="font-mono text-[10px] text-purple-400 font-bold">
+                          {sleepTimerRemainingText}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+
+                  <button
+                    onClick={() => {
+                      setSleepTimerMinutes(-1);
+                      setSleepTimerExpiresAt(null);
+                      setSleepTimerRemainingText('End');
+                      setIsSleepTimerMenuOpen(false);
+                    }}
+                    className={`w-full text-left px-2 py-1.5 rounded transition ${
+                      sleepTimerMinutes === -1
+                        ? 'bg-purple-950/60 text-purple-300 font-medium'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-charcoal-850'
+                    }`}
+                  >
+                    Selesai Track Ini
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+
+          {/* Floating Mini-Player / Document PiP Button */}
+          <button
+            onClick={toggleMiniPlayer}
+            title={isMiniPlayerOpen ? 'Close Mini-Player' : 'Mini-Player (Picture-in-Picture)'}
+            className={`p-2 rounded transition ${
+              isMiniPlayerOpen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            }`}
+          >
+            <PictureInPicture2 size={16} />
+          </button>
+
+          {/* Fullscreen Toggle Button */}
+          <button
+            onClick={toggleFullscreen}
+            title={isFullscreen ? 'Keluar dari Layar Penuh (F11 / F)' : 'Mode Layar Penuh (F11 / F)'}
+            className={`p-2 rounded transition ${
+              isFullscreen ? 'text-crimson-400 bg-charcoal-800' : 'text-zinc-400 hover:bg-charcoal-800'
+            }`}
+          >
+            {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
 
           {/* Queue Toggle Button */}
           <button

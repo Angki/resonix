@@ -2,9 +2,9 @@ import { create } from 'zustand';
 import { User, SearchField, Track } from '../types';
 
 export type ViewMode = 'table' | 'albumGrid';
-export type LibrarySection = 'all' | 'collection' | 'albums' | 'artists' | 'genres' | 'playlists' | 'favorites' | 'history';
-export type RightPanelTab = 'nowPlaying' | 'queue' | 'details';
-export type ThemeName = 'blacklibrary' | 'spotify' | 'musicbee' | 'amber' | 'light' | 'glass' | 'metro-dark' | 'metro-light';
+export type LibrarySection = 'all' | 'collection' | 'albums' | 'artists' | 'genres' | 'playlists' | 'favorites' | 'history' | 'smartPlaylist' | 'offline';
+export type RightPanelTab = 'nowPlaying' | 'queue' | 'details' | 'lyrics';
+export type ThemeName = 'resonance' | 'blacklibrary' | 'spotify' | 'musicbee' | 'amber' | 'light' | 'glass' | 'metro-dark' | 'metro-light';
 
 interface UiState {
   theme: ThemeName;
@@ -23,6 +23,7 @@ interface UiState {
   selectedGenre: string | null;
   selectedPlaylistId: string | null;
   selectedPlaylistName: string | null;
+  selectedSmartPlaylistKey: string | null;
   searchQuery: string;
   searchField: SearchField;
   rightPanelTab: RightPanelTab;
@@ -30,18 +31,32 @@ interface UiState {
   sortOrder: 'asc' | 'desc';
   albumSortBy: string;
   albumSortOrder: 'asc' | 'desc';
+  albumQualityFilter: string;
   columnVisibility: Record<string, boolean>;
   columnWidths: Record<string, number>;
   isSettingsOpen: boolean;
   isAuthModalOpen: boolean;
   isEqualizerOpen: boolean;
   isKeyboardShortcutsOpen: boolean;
+  isCommandPaletteOpen: boolean;
   isMobileNowPlayingOpen: boolean;
+  isMiniPlayerOpen: boolean;
   isTrackPropertiesOpen: boolean;
   propertiesTrack: Track | null;
   highlightedAlbumId: string | null;
   gridCoverSize: number;
+  gridDensity: 'compact' | 'comfortable' | 'minimal';
+  showGridTrackCount: boolean;
+  showGridQualityBadge: boolean;
+  showGridYear: boolean;
+  showGridArtist: boolean;
+  ambientMotionEnabled: boolean;
+  visualizerAmbientBg: 'cover-blur' | 'dim' | 'off';
   currentUser: User | null;
+  pwaInstallPrompt: any;
+  isPwaInstalled: boolean;
+  isPwaBannerDismissed: boolean;
+  isFullscreen: boolean;
 
   // Actions
   setTheme: (theme: ThemeName) => void;
@@ -53,28 +68,46 @@ interface UiState {
   setRightPanelWidth: (w: number) => void;
   setViewMode: (mode: ViewMode) => void;
   setGridCoverSize: (size: number) => void;
+  setGridDensity: (density: 'compact' | 'comfortable' | 'minimal') => void;
+  setShowGridTrackCount: (val: boolean) => void;
+  setShowGridQualityBadge: (val: boolean) => void;
+  setShowGridYear: (val: boolean) => void;
+  setShowGridArtist: (val: boolean) => void;
+  setAmbientMotionEnabled: (val: boolean) => void;
+  setVisualizerAmbientBg: (mode: 'cover-blur' | 'dim' | 'off') => void;
   setActiveSection: (sec: LibrarySection) => void;
   selectCollection: (rootId: string | null, name?: string | null) => void;
   selectArtist: (artistId: string | null, name?: string | null) => void;
   selectAlbum: (albumId: string | null, title?: string | null) => void;
   selectGenre: (genre: string | null) => void;
   selectPlaylist: (playlistId: string | null, name?: string | null) => void;
+  selectSmartPlaylist: (key: string) => void;
   setSearchQuery: (query: string) => void;
   setSearchField: (field: SearchField) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
   setSorting: (sortBy: string, sortOrder: 'asc' | 'desc') => void;
   setAlbumSorting: (sortBy: string, sortOrder: 'asc' | 'desc') => void;
+  setAlbumQualityFilter: (quality: string) => void;
   toggleColumnVisibility: (columnId: string) => void;
   setColumnWidth: (columnId: string, width: number) => void;
   setSettingsOpen: (open: boolean) => void;
   setAuthModalOpen: (open: boolean) => void;
   setEqualizerOpen: (open: boolean) => void;
   setKeyboardShortcutsOpen: (open: boolean) => void;
+  setCommandPaletteOpen: (open: boolean) => void;
+  toggleCommandPalette: () => void;
   setMobileNowPlayingOpen: (open: boolean) => void;
+  setMiniPlayerOpen: (open: boolean) => void;
+  toggleMiniPlayer: () => void;
   openTrackProperties: (track: Track) => void;
   closeTrackProperties: () => void;
   setHighlightedAlbumId: (id: string | null) => void;
   setCurrentUser: (user: User | null) => void;
+  setPwaInstallPrompt: (prompt: any) => void;
+  setIsPwaInstalled: (val: boolean) => void;
+  dismissPwaBanner: () => void;
+  setIsFullscreen: (val: boolean) => void;
+  toggleFullscreen: () => void;
 }
 
 const UI_STORAGE_KEY = 'black_library_ui_prefs';
@@ -111,10 +144,18 @@ function persistUi(state: UiState) {
       rightPanelWidth: state.rightPanelWidth,
       viewMode: state.viewMode,
       gridCoverSize: state.gridCoverSize,
+      gridDensity: state.gridDensity,
+      showGridTrackCount: state.showGridTrackCount,
+      showGridQualityBadge: state.showGridQualityBadge,
+      showGridYear: state.showGridYear,
+      showGridArtist: state.showGridArtist,
+      ambientMotionEnabled: state.ambientMotionEnabled,
+      visualizerAmbientBg: state.visualizerAmbientBg,
       sortBy: state.sortBy,
       sortOrder: state.sortOrder,
       albumSortBy: state.albumSortBy,
       albumSortOrder: state.albumSortOrder,
+      albumQualityFilter: state.albumQualityFilter,
       columnVisibility: state.columnVisibility,
       columnWidths: state.columnWidths,
       searchField: state.searchField,
@@ -128,16 +169,28 @@ function persistUi(state: UiState) {
 const persisted = loadPersistedUi();
 const initialTheme: ThemeName = (persisted.theme as ThemeName) ?? 'blacklibrary';
 applyThemeToDocument(initialTheme);
-const isInitiallyCompact = typeof window !== 'undefined' ? window.innerWidth < 1024 : false;
+const isInitiallyMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
+// On desktop/tablets, always default the Library Navigator to open unless on small mobile screens
+const initialLeftSidebar =
+  typeof window !== 'undefined' && window.innerWidth >= 1024
+    ? true
+    : (!isInitiallyMobile ? (persisted.leftSidebarOpen ?? true) : false);
 
 export const useUiStore = create<UiState>((set, get) => ({
   theme: initialTheme,
-  leftSidebarOpen: isInitiallyCompact ? false : (persisted.leftSidebarOpen ?? true),
+  leftSidebarOpen: initialLeftSidebar,
   leftSidebarWidth: persisted.leftSidebarWidth ?? 240,
-  rightPanelOpen: isInitiallyCompact ? false : (persisted.rightPanelOpen ?? false),
+  rightPanelOpen: isInitiallyMobile ? false : (persisted.rightPanelOpen ?? false),
   rightPanelWidth: persisted.rightPanelWidth ?? 340,
   viewMode: persisted.viewMode ?? 'albumGrid',
   gridCoverSize: persisted.gridCoverSize ?? 170,
+  gridDensity: persisted.gridDensity ?? 'comfortable',
+  showGridTrackCount: persisted.showGridTrackCount ?? false,
+  showGridQualityBadge: persisted.showGridQualityBadge ?? true,
+  showGridYear: persisted.showGridYear ?? false,
+  showGridArtist: persisted.showGridArtist ?? true,
+  ambientMotionEnabled: persisted.ambientMotionEnabled ?? true,
+  visualizerAmbientBg: persisted.visualizerAmbientBg ?? 'cover-blur',
   activeSection: 'all',
   selectedRootId: null,
   selectedRootName: null,
@@ -148,6 +201,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   selectedGenre: null,
   selectedPlaylistId: null,
   selectedPlaylistName: null,
+  selectedSmartPlaylistKey: null,
   searchQuery: '',
   searchField: (persisted.searchField as SearchField) ?? 'all',
   rightPanelTab: 'nowPlaying',
@@ -155,6 +209,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   sortOrder: (persisted.sortOrder as 'asc' | 'desc') ?? 'asc',
   albumSortBy: persisted.albumSortBy ?? 'albumArtist',
   albumSortOrder: (persisted.albumSortOrder as 'asc' | 'desc') ?? 'asc',
+  albumQualityFilter: (persisted.albumQualityFilter as string) ?? 'all',
   columnVisibility: persisted.columnVisibility ?? {
     artwork: true,
     title: true,
@@ -175,11 +230,17 @@ export const useUiStore = create<UiState>((set, get) => ({
   isAuthModalOpen: false,
   isEqualizerOpen: false,
   isKeyboardShortcutsOpen: false,
+  isCommandPaletteOpen: false,
   isMobileNowPlayingOpen: false,
+  isMiniPlayerOpen: false,
   isTrackPropertiesOpen: false,
   propertiesTrack: null,
   highlightedAlbumId: null,
   currentUser: null,
+  pwaInstallPrompt: null,
+  isPwaInstalled: typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true),
+  isPwaBannerDismissed: typeof sessionStorage !== 'undefined' && sessionStorage.getItem('bl_pwa_banner_dismissed') === 'true',
+  isFullscreen: typeof document !== 'undefined' ? !!document.fullscreenElement : false,
 
   setTheme: (theme) => {
     applyThemeToDocument(theme);
@@ -229,12 +290,11 @@ export const useUiStore = create<UiState>((set, get) => ({
       selectedGenre: null,
       selectedPlaylistId: null,
       selectedPlaylistName: null,
+      selectedSmartPlaylistKey: null,
     };
 
     if (sec === 'albums') {
       updates.viewMode = 'albumGrid';
-      updates.selectedRootId = null;
-      updates.selectedRootName = null;
     } else if (sec === 'all') {
       updates.viewMode = 'table';
       updates.selectedRootId = null;
@@ -275,6 +335,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       selectedArtistName: name || null,
       selectedAlbumId: null,
       selectedAlbumTitle: null,
+      activeSection: 'artists',
     });
   },
   selectAlbum: (albumId, title) => {
@@ -296,6 +357,19 @@ export const useUiStore = create<UiState>((set, get) => ({
       selectedPlaylistName: name || null,
       activeSection: 'playlists',
       viewMode: 'table',
+      selectedSmartPlaylistKey: null,
+    });
+  },
+  selectSmartPlaylist: (key) => {
+    set({
+      selectedSmartPlaylistKey: key,
+      activeSection: 'smartPlaylist',
+      viewMode: 'table',
+      selectedRootId: null,
+      selectedArtistId: null,
+      selectedAlbumId: null,
+      selectedGenre: null,
+      selectedPlaylistId: null,
     });
   },
   setSearchQuery: (query) => set({ searchQuery: query }),
@@ -310,6 +384,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setAlbumSorting: (albumSortBy, albumSortOrder) => {
     set({ albumSortBy, albumSortOrder });
+    persistUi(get());
+  },
+  setAlbumQualityFilter: (albumQualityFilter) => {
+    set({ albumQualityFilter });
     persistUi(get());
   },
   toggleColumnVisibility: (colId) => {
@@ -331,9 +409,60 @@ export const useUiStore = create<UiState>((set, get) => ({
   setAuthModalOpen: (open) => set({ isAuthModalOpen: open }),
   setEqualizerOpen: (open) => set({ isEqualizerOpen: open }),
   setKeyboardShortcutsOpen: (open) => set({ isKeyboardShortcutsOpen: open }),
+  setCommandPaletteOpen: (open) => set({ isCommandPaletteOpen: open }),
+  toggleCommandPalette: () => set(s => ({ isCommandPaletteOpen: !s.isCommandPaletteOpen })),
   setMobileNowPlayingOpen: (open) => set({ isMobileNowPlayingOpen: open }),
+  setMiniPlayerOpen: (open) => set({ isMiniPlayerOpen: open }),
+  toggleMiniPlayer: () => set(s => ({ isMiniPlayerOpen: !s.isMiniPlayerOpen })),
   openTrackProperties: (track) => set({ isTrackPropertiesOpen: true, propertiesTrack: track }),
   closeTrackProperties: () => set({ isTrackPropertiesOpen: false, propertiesTrack: null }),
+  setGridDensity: (gridDensity) => {
+    set({ gridDensity });
+    persistUi(get());
+  },
+  setShowGridTrackCount: (val) => {
+    set({ showGridTrackCount: val });
+    persistUi(get());
+  },
+  setShowGridQualityBadge: (val) => {
+    set({ showGridQualityBadge: val });
+    persistUi(get());
+  },
+  setShowGridYear: (val) => {
+    set({ showGridYear: val });
+    persistUi(get());
+  },
+  setShowGridArtist: (val) => {
+    set({ showGridArtist: val });
+    persistUi(get());
+  },
+  setAmbientMotionEnabled: (val) => {
+    set({ ambientMotionEnabled: val });
+    persistUi(get());
+  },
+  setVisualizerAmbientBg: (visualizerAmbientBg) => {
+    set({ visualizerAmbientBg });
+    persistUi(get());
+  },
   setHighlightedAlbumId: (id) => set({ highlightedAlbumId: id }),
   setCurrentUser: (user) => set({ currentUser: user }),
+  setPwaInstallPrompt: (pwaInstallPrompt) => set({ pwaInstallPrompt }),
+  setIsPwaInstalled: (isPwaInstalled) => set({ isPwaInstalled }),
+  dismissPwaBanner: () => {
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.setItem('bl_pwa_banner_dismissed', 'true');
+    }
+    set({ isPwaBannerDismissed: true });
+  },
+  setIsFullscreen: (val) => set({ isFullscreen: val }),
+  toggleFullscreen: () => {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      set({ isFullscreen: true });
+    } else {
+      document.exitFullscreen().catch(() => {});
+      set({ isFullscreen: false });
+    }
+  },
 }));

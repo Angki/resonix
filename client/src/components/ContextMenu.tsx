@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { Play, ListPlus, Radio, Star, FolderPlus, Info, Compass, FileAudio } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Play, ListPlus, Radio, Star, FolderPlus, Info, Compass, FileAudio, Download, CheckCircle } from 'lucide-react';
+import { LastFmIcon } from './LastFmIcon';
 import { Track } from '../types';
+import { offlineStorageService } from '../services/offlineStorageService';
 
 interface ContextMenuProps {
   x: number;
@@ -15,6 +18,7 @@ interface ContextMenuProps {
   onShowDetails?: (track: Track) => void;
   onLocateAlbum?: (track: Track) => void;
   onOpenProperties?: (track: Track) => void;
+  onSyncLastFm?: (track: Track) => void;
 }
 
 export const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -30,6 +34,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onShowDetails,
   onLocateAlbum,
   onOpenProperties,
+  onSyncLastFm,
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -39,18 +44,45 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         onClose();
       }
     };
+    const handleScroll = () => {
+      onClose();
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    const handleResize = () => {
+      onClose();
+    };
+
     window.addEventListener('mousedown', handleClickOutside);
-    return () => window.removeEventListener('mousedown', handleClickOutside);
+    window.addEventListener('scroll', handleScroll, true);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('scroll', handleScroll, true);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleResize);
+    };
   }, [onClose]);
 
-  if (selectedTracks.length === 0) return null;
+  if (selectedTracks.length === 0 || typeof document === 'undefined') return null;
   const primaryTrack = selectedTracks[0];
 
-  return (
+  const menuWidth = 220;
+  const menuHeight = 280;
+  const winWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const winHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+  const posX = Math.max(8, Math.min(x, winWidth - menuWidth - 8));
+  const posY = Math.max(8, Math.min(y, winHeight - menuHeight - 8));
+
+  return createPortal(
     <div
       ref={menuRef}
-      style={{ top: Math.min(y, window.innerHeight - 250), left: Math.min(x, window.innerWidth - 220) }}
-      className="fixed z-50 w-52 bg-charcoal-850 border border-charcoal-700 rounded-md shadow-2xl py-1 text-xs select-none backdrop-blur-md"
+      style={{ top: posY, left: posX }}
+      className="fixed z-[9999] w-52 bg-charcoal-850/95 border border-charcoal-700 rounded-md shadow-2xl py-1 text-xs select-none backdrop-blur-md animate-in fade-in zoom-in-95 duration-100"
     >
       <div className="px-3 py-1 text-[11px] font-semibold text-zinc-400 border-b border-charcoal-750 truncate">
         {selectedTracks.length === 1 ? primaryTrack.title : `${selectedTracks.length} tracks selected`}
@@ -100,6 +132,31 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
       >
         <Star size={13} className={primaryTrack.isFavorite ? 'text-yellow-400 fill-yellow-400' : 'text-zinc-400'} />
         <span>{primaryTrack.isFavorite ? 'Remove Favorite' : 'Add to Favorites'}</span>
+      </button>
+
+      <button
+        onClick={async () => {
+          const isOff = offlineStorageService.isOffline(primaryTrack.id);
+          if (isOff) {
+            await offlineStorageService.removeTrack(primaryTrack.id);
+          } else {
+            await offlineStorageService.saveTrack(primaryTrack);
+          }
+          onClose();
+        }}
+        className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
+      >
+        {offlineStorageService.isOffline(primaryTrack.id) ? (
+          <>
+            <CheckCircle size={13} className="text-emerald-400" />
+            <span>Remove from Offline Cache</span>
+          </>
+        ) : (
+          <>
+            <Download size={13} className="text-cyan-400" />
+            <span>Save for Offline Playback</span>
+          </>
+        )}
       </button>
 
       {onAddToPlaylist && (
@@ -153,6 +210,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           <span>Technical File Properties</span>
         </button>
       )}
-    </div>
+
+      {onSyncLastFm && (
+        <button
+          onClick={() => {
+            onSyncLastFm(primaryTrack);
+            onClose();
+          }}
+          className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition border-t border-charcoal-750/60 mt-0.5 pt-1.5"
+        >
+          <LastFmIcon size={13} className="text-red-500" />
+          <span>Sync Last.fm Play Count</span>
+        </button>
+      )}
+    </div>,
+    document.body
   );
 };

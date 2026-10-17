@@ -1,4 +1,4 @@
-# Black Library - Production Start Script
+# Resonix - Production Start Script
 # Runs single-origin Fastify server (API + built React frontend) on 127.0.0.1:3000
 $ErrorActionPreference = "Stop"
 
@@ -8,7 +8,7 @@ $projectRoot = Split-Path -Parent $scriptDir
 Set-Location $projectRoot
 
 Write-Host "======================================================" -ForegroundColor Cyan
-Write-Host "  STARTING BLACK LIBRARY PRODUCTION SERVER" -ForegroundColor Cyan
+Write-Host "  STARTING RESONIX AUDIOPHILE STREAMING SERVER" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
 if (-not (Test-Path "$projectRoot\server\dist\index.js")) {

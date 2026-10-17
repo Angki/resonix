@@ -21,6 +21,7 @@ server/prisma/data/
 
 # Cache & build info
 cache/
+scratch/
 *.tsbuildinfo
 client/vite.config.d.ts
 client/vite.config.js
@@ -30,4 +31,19 @@ client/vite.config.js
 .idea/
 .DS_Store
 Thumbs.db
+
+# Certificates & keys
+*.pem
+*.key
+*.cert
+*.local
+
+# Internal agent configs, scratchpads, and design notes
+.agents/
+context.md
+docs/
+
+# Prisma generated client and binaries (generated via npm run db:generate)
+server/src/generated/
+
 

@@ -1,22 +1,61 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en" class="dark" style="background-color: #0b0d0e; color: #e4e4e7;">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Black Library - Personal Audio Streamer</title>
-    <meta name="description" content="High performance local music streaming server for Windows & Tailscale" />
-    <meta name="theme-color" content="#881337" />
+    <title>Resonix — High-Fidelity Music Streaming Server & Audio Vault</title>
+    <meta name="description" content="Self-hosted audiophile personal music streaming server with Web Audio DSP, 60fps canvas visualizers, and OpenSubsonic API compatibility" />
+    <meta name="theme-color" content="#06b6d4" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Black Library" />
+    <meta name="apple-mobile-web-app-title" content="Resonix" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="apple-touch-icon" href="/icon.svg" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <style>
+      html, body {
+        background-color: #06090e !important;
+        color: #e4e4e7 !important;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #root:empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        width: 100vw;
+        background-color: #06090e;
+      }
+      #root:empty::before {
+        content: "Loading Resonix...";
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        color: #71717a;
+        letter-spacing: 0.05em;
+      }
+    </style>
   </head>
-  <body class="bg-charcoal-950 text-zinc-100 overflow-hidden">
+  <body class="bg-charcoal-950 text-zinc-100 overflow-hidden" style="background-color: #06090e; color: #e4e4e7;">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
+      // Self-heal on chunk loading failures caused by stale ServiceWorker caches
+      window.addEventListener('error', function(e) {
+        if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
+          console.warn('[Resonix] Asset failed to load. Auto-clearing cache...');
+          if ('caches' in window) {
+            caches.keys().then(function(keys) {
+              return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+            }).then(function() {
+              window.location.reload();
+            });
+          }
+        }
+      }, true);
+
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then((reg) => {

@@ -1,5 +1,6 @@
 import React, { useRef, useState, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Star,
   Play,
@@ -10,6 +11,8 @@ import {
   Music,
   RefreshCw,
   LogIn,
+  CheckCircle,
+  Headphones,
 } from 'lucide-react';
 import { Track } from '../types';
 import { usePlayerStore } from '../store/playerStore';
@@ -18,10 +21,12 @@ import { useResponsive } from '../hooks/useResponsive';
 import { api } from '../api/client';
 import { ContextMenu } from './ContextMenu';
 import { AlphabetBar } from './AlphabetBar';
+import { offlineStorageService } from '../services/offlineStorageService';
 
 interface TrackTableProps {
   tracks: Track[];
   isLoading?: boolean;
+  isFetching?: boolean;
 }
 
 function formatDuration(sec: number): string {
@@ -55,7 +60,7 @@ function formatCodecBadge(codec?: string | null, bitrate?: number | null, isLoss
   return name;
 }
 
-export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => {
+export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading, isFetching }) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useResponsive();
   const { currentTrack, isPlaying, playTrack, addToQueue, playNext } = usePlayerStore();
@@ -74,12 +79,23 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
     setViewMode,
     openTrackProperties,
     setHighlightedAlbumId,
+    selectArtist,
+    selectAlbum,
   } = useUiStore();
+
+  const queryClient = useQueryClient();
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedIndex, setLastSelectedIndex] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; tracks: Track[] } | null>(null);
   const [selectedLetter, setSelectedLetter] = useState<string | null>(null);
+  const [, setOfflineVersion] = useState(0);
+
+  React.useEffect(() => {
+    return offlineStorageService.subscribe(() => {
+      setOfflineVersion((v) => v + 1);
+    });
+  }, []);
 
   // Alphabetical letter index map for rapid jumping
   const { availableLetters, letterIndexMap } = useMemo(() => {
@@ -178,7 +194,7 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
     );
   };
 
-  if (isLoading) {
+  if (isLoading && tracks.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-zinc-500 space-y-2">
         <div className="w-8 h-8 border-2 border-crimson-600 border-t-transparent rounded-full animate-spin" />
@@ -202,7 +218,7 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
               ? 'Try modifying your search term or switching the search filter mode.'
               : !currentUser
               ? 'Please log in to load your library and start streaming.'
-              : 'Scan your local folders (RAW BLACK METAL, GORE, NOISE, DUNGEON SYNTHS) to populate your library.'}
+              : 'Scan your local music folders in Settings to populate your audio library.'}
           </p>
           <div className="pt-2 flex justify-center">
             {searchQuery ? (
@@ -236,7 +252,14 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-charcoal-900 select-none overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-charcoal-900 select-none overflow-hidden relative">
+      {/* Background loading shimmer bar */}
+      {isFetching && (
+        <div className="absolute top-0 left-0 right-0 h-0.5 bg-crimson-950/60 overflow-hidden z-30 pointer-events-none">
+          <div className="h-full bg-gradient-to-r from-crimson-600 via-crimson-400 to-crimson-600 animate-pulse w-full" />
+        </div>
+      )}
+
       {/* Alphabet mini-scroller for rapid navigation */}
       {availableLetters.size > 0 && (
         <AlphabetBar
@@ -339,7 +362,11 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
                 {/* Track Status or Index */}
                 <div className="w-7 sm:w-8 text-center text-zinc-500 font-mono text-[10px] flex items-center justify-center shrink-0">
                   {isCurrent && isPlaying ? (
-                    <Volume2 size={12} className="text-crimson-500 animate-pulse" />
+                    <div className="flex items-end justify-center space-x-[2px] h-3 w-3" title="Now Playing">
+                      <span className="w-[2px] bg-crimson-500 rounded-xs animate-bounce" style={{ height: '70%', animationDuration: '0.6s' }} />
+                      <span className="w-[2px] bg-crimson-400 rounded-xs animate-bounce" style={{ height: '100%', animationDuration: '0.4s' }} />
+                      <span className="w-[2px] bg-crimson-600 rounded-xs animate-bounce" style={{ height: '50%', animationDuration: '0.7s' }} />
+                    </div>
                   ) : isCurrent ? (
                     <Play size={10} className="text-crimson-500 fill-crimson-500" />
                   ) : (
@@ -365,24 +392,56 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
 
                 {/* Title & Mobile Subtitle */}
                 <div className="flex-1 min-w-[110px] truncate px-2 font-normal flex flex-col justify-center">
-                  <span className={`truncate ${isCurrent ? 'text-crimson-400 font-medium' : 'text-zinc-100'}`}>
-                    {track.title}
-                  </span>
-                  <span className="sm:hidden text-[10px] text-zinc-500 truncate mt-0.5">
-                    {track.artistName} {track.albumTitle ? `• ${track.albumTitle}` : ''}
+                  <div className="flex items-center space-x-1.5 truncate">
+                    <span className={`truncate ${isCurrent ? 'text-crimson-400 font-medium' : 'text-zinc-100'}`}>
+                      {track.title}
+                    </span>
+                    {offlineStorageService.isOffline(track.id) && (
+                      <span title="Tersedia Offline (Cached)" className="inline-flex shrink-0">
+                        <CheckCircle size={10} className="text-emerald-400" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="sm:hidden text-[10px] text-zinc-500 truncate mt-0.5 flex items-center space-x-1">
+                    <span className="truncate">{track.artistName} {track.albumTitle ? `• ${track.albumTitle}` : ''}</span>
+                    {track.combinedPlayCount > 0 && (
+                      <span className="text-emerald-400 font-mono flex items-center space-x-0.5 shrink-0" title={`${track.combinedPlayCount} plays`}>
+                        <span>•</span>
+                        <Headphones size={9} />
+                        <span>{track.combinedPlayCount}</span>
+                      </span>
+                    )}
                   </span>
                 </div>
 
                 {/* Artist */}
                 <div className="w-36 md:w-44 hidden sm:block truncate px-2 text-zinc-400 shrink-0">
-                  <span className="truncate hover:underline cursor-pointer">
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (track.artistId) {
+                        selectArtist(track.artistId, track.artistName);
+                      }
+                    }}
+                    className="truncate hover:underline hover:text-zinc-200 cursor-pointer"
+                    title={`View artist: ${track.artistName}`}
+                  >
                     {track.artistName}
                   </span>
                 </div>
 
                 {/* Album */}
                 <div className="w-40 md:w-48 hidden md:block truncate px-2 text-zinc-400 shrink-0">
-                  <span className="truncate hover:underline cursor-pointer">
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (track.albumId) {
+                        selectAlbum(track.albumId, track.albumTitle);
+                      }
+                    }}
+                    className="truncate hover:underline hover:text-zinc-200 cursor-pointer"
+                    title={`View album: ${track.albumTitle}`}
+                  >
                     {track.albumTitle}
                   </span>
                 </div>
@@ -411,8 +470,18 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
                 </div>
 
                 {/* Play Count */}
-                <div className="w-14 text-right font-mono text-[10.5px] text-zinc-500 hidden sm:block px-2 shrink-0">
-                  {track.combinedPlayCount > 0 ? track.combinedPlayCount : '-'}
+                <div className="w-14 text-right font-mono text-[10.5px] text-zinc-500 hidden sm:flex items-center justify-end px-2 shrink-0">
+                  {track.combinedPlayCount > 0 ? (
+                    <span
+                      className="text-emerald-400 font-mono font-medium flex items-center space-x-1"
+                      title={`Total plays: ${track.combinedPlayCount} (Local: ${track.localPlayCount || 0}, Last.fm: ${track.importedPlayCount || 0})`}
+                    >
+                      <Headphones size={10} className="text-emerald-400/80" />
+                      <span>{track.combinedPlayCount}</span>
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600">-</span>
+                  )}
                 </div>
               </div>
             );
@@ -442,6 +511,14 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading }) => 
           onShowDetails={(t) => {
             if (!rightPanelOpen) toggleRightPanel();
             setRightPanelTab('details');
+          }}
+          onSyncLastFm={async (t) => {
+            try {
+              await api.syncTrackLastFm(t.id);
+              await queryClient.invalidateQueries({ queryKey: ['tracks'] });
+            } catch (err) {
+              console.error('Failed to sync track with Last.fm:', err);
+            }
           }}
         />
       )}

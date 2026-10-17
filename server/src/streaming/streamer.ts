@@ -49,6 +49,14 @@ export async function handleStreamRequest(
 
   // Transcoded stream path
   if (shouldTranscode) {
+    if (req.method === 'HEAD') {
+      reply.raw.setHeader('Content-Type', 'audio/mpeg');
+      reply.raw.setHeader('Content-Disposition', 'inline');
+      reply.raw.setHeader('Accept-Ranges', 'none');
+      reply.raw.setHeader('X-Transcoded-Stream', 'true');
+      return reply.status(200).send();
+    }
+
     const startOffset = parseFloat(req.query.offset || '0') || 0;
     const bitrate = parseInt(req.query.bitrate || '320', 10) || 320;
 

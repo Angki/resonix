@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type VisualizerTheme = 'crimson' | 'cyber' | 'matrix' | 'abyss' | 'solar' | 'silver';
+export type VisualizerTheme = 'resonance' | 'crimson' | 'cyber' | 'matrix' | 'abyss' | 'solar' | 'silver';
 
 export interface VisualizerModeDef {
   id: number;
@@ -70,6 +70,24 @@ export const VISUALIZER_MODES: VisualizerModeDef[] = [
     tagline: '3D Wireframe Horizon',
     description: '80s perspective synthwave road undulating to bass beneath a glowing sunset.',
   },
+  {
+    id: 10,
+    name: 'Album Art Pulse',
+    tagline: 'Cover Art Spectrum Halo',
+    description: 'Floating high-res album cover with audio-reactive bass pulse, 360° frequency spectrum ring, and floor reflection.',
+  },
+  {
+    id: 11,
+    name: 'Live Synced Lyrics',
+    tagline: 'Audio-Reactive Karaoke',
+    description: 'Synchronized live lyrics floating over an audio-reactive particle field with glowing active line tracking.',
+  },
+  {
+    id: 12,
+    name: 'Audiophile Stage & VU',
+    tagline: 'Hi-Fi Showcase & Dual VU Meters',
+    description: 'High-res album artwork on illuminated glass stage with twin analog needle VU ballistic meters, frequency halo, and lossless metadata tags.',
+  },
 ];
 
 interface VisualizerState {
@@ -120,14 +138,27 @@ const persisted = loadPersisted();
 
 export const useVisualizerStore = create<VisualizerState>((set, get) => ({
   isOpen: false,
-  mode: typeof persisted.mode === 'number' && persisted.mode >= 0 && persisted.mode < 10 ? persisted.mode : 0,
+  mode: typeof persisted.mode === 'number' && persisted.mode >= 0 && persisted.mode < 13 ? persisted.mode : 0,
   theme: (persisted.theme as VisualizerTheme) || 'crimson',
   sensitivity: typeof persisted.sensitivity === 'number' ? persisted.sensitivity : 1.0,
-  showOverlay: persisted.showOverlay !== undefined ? persisted.showOverlay : true,
+  showOverlay: true,
   isFullscreen: false,
 
-  setOpen: (open) => set({ isOpen: open }),
-  toggleOpen: () => set({ isOpen: !get().isOpen }),
+  setOpen: (open) => {
+    if (open) {
+      set({ isOpen: true, showOverlay: true });
+    } else {
+      set({ isOpen: false });
+    }
+  },
+  toggleOpen: () => {
+    const next = !get().isOpen;
+    if (next) {
+      set({ isOpen: true, showOverlay: true });
+    } else {
+      set({ isOpen: false });
+    }
+  },
 
   setMode: (mode) => {
     const clamped = Math.max(0, Math.min(VISUALIZER_MODES.length - 1, mode));

@@ -23,9 +23,14 @@ const envSchema = z.object({
   LASTFM_USERNAME: z.string().optional().default(''),
   LASTFM_PASSWORD: z.string().optional().default(''),
   LASTFM_SESSION_KEY: z.string().optional().default(''),
+  DISCOGS_CONSUMER_KEY: z.string().optional().default(''),
+  DISCOGS_CONSUMER_SECRET: z.string().optional().default(''),
   FFMPEG_PATH: z.string().optional().default(''),
-  MUSICBEE_DISCOVERY_PATH: z.string().default('C:/Users/angki/Music'),
-  LIBRARY_ROOTS_JSON: z.string().default('["D:/Music/RAW BLACK METAL","D:/Music/GORE","D:/Music/NOISE","D:/Music/DUNGEON SYNTHS"]'),
+  PLAYLIST_IMPORT_PATH: z.string().optional().default(''),
+  MUSICBEE_DISCOVERY_PATH: z.string().default('./data/playlists'),
+  LIBRARY_ROOTS_JSON: z.string().default('[]'),
+  DEPLOYMENT_PROFILE: z.enum(['PERSONAL', 'LAN', 'PUBLIC']).default('PERSONAL'),
+  ALLOWED_ORIGINS: z.string().optional().default(''),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -35,23 +40,49 @@ if (!parsedEnv.success) {
   process.exit(1);
 }
 
+// Support PLAYLIST_IMPORT_PATH or fallback to MUSICBEE_DISCOVERY_PATH
+const effectivePlaylistPath = process.env.PLAYLIST_IMPORT_PATH || parsedEnv.data.MUSICBEE_DISCOVERY_PATH;
+
 let libraryRoots: string[] = [];
 try {
   libraryRoots = JSON.parse(parsedEnv.data.LIBRARY_ROOTS_JSON);
 } catch {
-  libraryRoots = [
-    'D:/Music/RAW BLACK METAL',
-    'D:/Music/GORE',
-    'D:/Music/NOISE',
-    'D:/Music/DUNGEON SYNTHS',
-  ];
+  libraryRoots = [];
 }
+
+const defaultOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+];
+
+if (parsedEnv.data.APP_BASE_URL) {
+  try {
+    const origin = new URL(parsedEnv.data.APP_BASE_URL).origin;
+    if (!defaultOrigins.includes(origin)) {
+      defaultOrigins.push(origin);
+    }
+  } catch {
+    // ignore malformed URL
+  }
+}
+
+const customOrigins = (parsedEnv.data.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
 
 export const config = {
   ...parsedEnv.data,
+  playlistDiscoveryPath: effectivePlaylistPath,
+  MUSICBEE_DISCOVERY_PATH: effectivePlaylistPath,
   libraryRoots: libraryRoots.map(r => path.normalize(r.trim())),
+  allowedOrigins: Array.from(new Set([...defaultOrigins, ...customOrigins])),
   cacheDir: path.join(rootDir, 'cache'),
   artworkCacheDir: path.join(rootDir, 'cache', 'artwork'),
   dataDir: path.join(rootDir, 'data'),
+  artistArtDir: path.join(rootDir, 'data', 'artists'),
+  lyricsDir: path.join(rootDir, 'data', 'lyrics'),
   rootDir,
 };

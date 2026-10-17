@@ -427,14 +427,18 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
           }
         }
 
-        // 4. Mark removed tracks as unavailable
-        for (const [normLower, t] of existingMap) {
-          if (!seenPaths.has(normLower)) {
-            await prisma.track.update({
-              where: { id: t.id },
-              data: { isUnavailable: true },
-            });
+        // 4. Mark removed tracks as unavailable ONLY if scan completed without cancellation
+        if (!cancelRequested && activeScan.errorsCount < 50) {
+          for (const [normLower, t] of existingMap) {
+            if (!seenPaths.has(normLower)) {
+              await prisma.track.update({
+                where: { id: t.id },
+                data: { isUnavailable: true },
+              });
+            }
           }
+        } else {
+          console.warn('[Scanner] Scan was cancelled or had errors; skipping unavailability marking to protect library.');
         }
 
         // Update root count
