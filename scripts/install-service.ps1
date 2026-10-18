@@ -1,5 +1,5 @@
-# Black Library - Optional Windows Task Scheduler Startup Task
-# Run with administrator privileges to register Black Library at system logon.
+# Resonix - Optional Windows Task Scheduler Startup Task
+# Run with administrator privileges to register Resonix at system logon.
 # Usage:
 #   .\scripts\install-service.ps1           (to register startup task)
 #   .\scripts\install-service.ps1 -Uninstall (to remove startup task)
@@ -8,7 +8,7 @@ param (
     [switch]$Uninstall
 )
 
-$TaskName = "BlackLibraryAudioServer"
+$TaskName = "ResonixAudioServer"
 
 if ($Uninstall) {
     Write-Host "Removing Scheduled Task: $TaskName..." -ForegroundColor Yellow
@@ -18,7 +18,7 @@ if ($Uninstall) {
 }
 
 Write-Host "======================================================" -ForegroundColor Cyan
-Write-Host "  BLACK LIBRARY - TASK SCHEDULER REGISTRATION" -ForegroundColor Cyan
+Write-Host "  RESONIX - TASK SCHEDULER REGISTRATION" -ForegroundColor Cyan
 Write-Host "======================================================" -ForegroundColor Cyan
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -30,9 +30,9 @@ $Trigger = New-ScheduledTaskTrigger -AtLogOn
 $Settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
 
 try {
-    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Description "Runs Black Library Audio Streaming Server" -User $env:USERNAME
+    Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger -Settings $Settings -Description "Runs Resonix Audio Streaming Server" -User $env:USERNAME
     Write-Host "`n[OK] Scheduled Task '$TaskName' registered successfully!" -ForegroundColor Green
-    Write-Host "Black Library will automatically run when you log in to Windows." -ForegroundColor Green
+    Write-Host "Resonix will automatically run when you log in to Windows." -ForegroundColor Green
     Write-Host "To remove: .\scripts\install-service.ps1 -Uninstall" -ForegroundColor DarkGray
 } catch {
     Write-Host "[ERROR] Failed to register scheduled task: $_" -ForegroundColor Red
