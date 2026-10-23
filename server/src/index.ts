@@ -28,6 +28,7 @@ import { artistsRoutes } from './routes/artists.js';
 import { lyricsRoutes } from './routes/lyrics.js';
 import { smartPlaylistsRoutes } from './routes/smartPlaylists.js';
 import { subsonicRoutes } from './routes/subsonic.js';
+import { healthRoutes } from './routes/health.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -127,6 +128,7 @@ app.register(settingsRoutes, { prefix: '/api/settings' });
 app.register(artistsRoutes, { prefix: '/api/artists' });
 app.register(lyricsRoutes, { prefix: '/api/lyrics' });
 app.register(smartPlaylistsRoutes, { prefix: '/api/smart-playlists' });
+app.register(healthRoutes, { prefix: '/api/library' });
 app.register(subsonicRoutes, { prefix: '/rest' });
 
 // Static Frontend Serving in Production

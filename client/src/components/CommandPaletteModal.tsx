@@ -25,6 +25,7 @@ import {
   List,
   Clock,
   ListMusic,
+  ShieldCheck,
   CornerDownLeft,
   X,
   Radio,
@@ -240,6 +241,17 @@ export const CommandPaletteModal: React.FC = () => {
         icon: <Clock className="w-4 h-4 text-emerald-400" />,
         action: () => {
           setActiveSection('history');
+        },
+      },
+      {
+        id: 'nav-health',
+        category: 'Commands',
+        title: 'View: Library Health Center',
+        subtitle: 'Diagnose duplicates, artwork gaps and metadata issues',
+        shortcut: '',
+        icon: <ShieldCheck className="w-4 h-4 text-cyan-400" />,
+        action: () => {
+          setActiveSection('health');
         },
       },
       {

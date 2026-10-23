@@ -352,6 +352,18 @@ export const LeftSidebar: React.FC = () => {
                 </span>
               )}
             </button>
+
+            <button
+              onClick={() => handleNavClick(() => setActiveSection('health'))}
+              className={`w-full flex items-center space-x-2 px-2 py-1.5 rounded transition ${
+                activeSection === 'health'
+                  ? 'bg-charcoal-800 text-cyan-300 font-medium'
+                  : 'text-zinc-400 hover:bg-charcoal-850 hover:text-zinc-200'
+              }`}
+            >
+              <ShieldCheck size={13} className="shrink-0 text-cyan-400" />
+              <span>Library Health</span>
+            </button>
           </div>
         </div>
 

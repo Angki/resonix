@@ -19,6 +19,7 @@ import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { MobileNowPlayingDrawer } from './components/MobileNowPlayingDrawer';
 import { TrackPropertiesModal } from './components/TrackPropertiesModal';
 import { PlayHistoryView } from './components/PlayHistoryView';
+import { LibraryHealthView } from './components/LibraryHealthView';
 import { ArtistGrid } from './components/ArtistGrid';
 import { ArtistDetailView } from './components/ArtistDetailView';
 import { SmartPlaylistView } from './components/SmartPlaylistView';
@@ -175,6 +176,8 @@ const MainLayout: React.FC = () => {
             )
           ) : activeSection === 'smartPlaylist' ? (
             <SmartPlaylistView />
+          ) : activeSection === 'health' ? (
+            <LibraryHealthView />
           ) : activeSection === 'offline' ? (
             <TrackTable
               tracks={offlineTracks}

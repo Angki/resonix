@@ -1,4 +1,4 @@
-import { Track, Artist, Album, Playlist, ScanStatus, User, ExternalPlaylistCandidate, MusicBeeCandidate, ArtistListItem, ArtistDetail, ArtistBatchStatus, LyricsData, SmartPlaylistPreset, SmartPlaylistDetail, SimilarArtistsResponse, AlbumScan, LibraryAuditResult } from '../types';
+import { Track, Artist, Album, Playlist, ScanStatus, User, ExternalPlaylistCandidate, MusicBeeCandidate, ArtistListItem, ArtistDetail, ArtistBatchStatus, LyricsData, SmartPlaylistPreset, SmartPlaylistDetail, SimilarArtistsResponse, AlbumScan, LibraryAuditResult, LibraryHealthOverview, HealthIssueType, HealthIssueDetail, IgnoredHealthIssue, VerifyLibraryFilesResult } from '../types';
 
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
@@ -220,6 +220,34 @@ export const api = {
 
   // Library Health & Audio Quality Audit
   getLibraryAudit: () => fetchJson<LibraryAuditResult>('/api/library/audit'),
+
+  // Library Health Center
+  getLibraryHealth: (refresh = false) =>
+    fetchJson<LibraryHealthOverview>(`/api/library/health/overview${refresh ? '?refresh=true' : ''}`),
+  getHealthIssueDetails: (type: HealthIssueType, params: { limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.limit) q.set('limit', String(params.limit));
+    if (params.offset) q.set('offset', String(params.offset));
+    const qs = q.toString() ? `?${q.toString()}` : '';
+    return fetchJson<HealthIssueDetail>(`/api/library/health/issues/${type}${qs}`);
+  },
+  getIgnoredHealthIssues: () =>
+    fetchJson<{ total: number; ignored: IgnoredHealthIssue[] }>('/api/library/health/ignored'),
+  ignoreHealthIssue: (body: { type: HealthIssueType; signature: string; label?: string }) =>
+    fetchJson<{ success: boolean; total: number }>('/api/library/health/ignore', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  unignoreHealthIssues: (body: { type?: HealthIssueType; signature?: string } = {}) =>
+    fetchJson<{ success: boolean; removed: number; total: number }>('/api/library/health/unignore', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  verifyLibraryFiles: (body: { rootId?: string; limit?: number } = {}) =>
+    fetchJson<VerifyLibraryFilesResult>('/api/library/health/verify', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   // Helpers
   getStreamUrl: (trackId: string, transcode: boolean = false) =>

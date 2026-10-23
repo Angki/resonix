@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { User, SearchField, Track } from '../types';
 
 export type ViewMode = 'table' | 'albumGrid';
-export type LibrarySection = 'all' | 'collection' | 'albums' | 'artists' | 'genres' | 'playlists' | 'favorites' | 'history' | 'smartPlaylist' | 'offline';
+export type LibrarySection = 'all' | 'collection' | 'albums' | 'artists' | 'genres' | 'playlists' | 'favorites' | 'history' | 'smartPlaylist' | 'offline' | 'health';
 export type RightPanelTab = 'nowPlaying' | 'queue' | 'details' | 'lyrics';
 export type ThemeName = 'resonance' | 'blacklibrary' | 'spotify' | 'musicbee' | 'amber' | 'light' | 'glass' | 'metro-dark' | 'metro-light';
 
@@ -313,6 +313,10 @@ export const useUiStore = create<UiState>((set, get) => ({
       updates.viewMode = 'table';
       updates.sortBy = 'lastPlayed';
       updates.sortOrder = 'desc';
+    } else if (sec === 'health') {
+      updates.viewMode = 'table';
+      updates.selectedRootId = null;
+      updates.selectedRootName = null;
     }
 
     set(updates);
