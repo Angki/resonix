@@ -110,7 +110,8 @@ interface UiState {
   toggleFullscreen: () => void;
 }
 
-const UI_STORAGE_KEY = 'black_library_ui_prefs';
+const UI_STORAGE_KEY = 'resonix_ui_prefs';
+const LEGACY_UI_STORAGE_KEY = 'black_library_ui_prefs';
 
 function applyThemeToDocument(theme: ThemeName) {
   if (typeof document !== 'undefined') {
@@ -126,7 +127,7 @@ function applyThemeToDocument(theme: ThemeName) {
 
 function loadPersistedUi(): Partial<UiState> {
   try {
-    const raw = localStorage.getItem(UI_STORAGE_KEY);
+    const raw = localStorage.getItem(UI_STORAGE_KEY) || localStorage.getItem(LEGACY_UI_STORAGE_KEY);
     if (!raw) return {};
     return JSON.parse(raw);
   } catch {
@@ -167,7 +168,7 @@ function persistUi(state: UiState) {
 }
 
 const persisted = loadPersistedUi();
-const initialTheme: ThemeName = (persisted.theme as ThemeName) ?? 'blacklibrary';
+const initialTheme: ThemeName = (persisted.theme as ThemeName) ?? 'resonance';
 applyThemeToDocument(initialTheme);
 const isInitiallyMobile = typeof window !== 'undefined' ? window.innerWidth < 768 : false;
 // On desktop/tablets, always default the Library Navigator to open unless on small mobile screens

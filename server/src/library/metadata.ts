@@ -20,6 +20,9 @@ export interface ExtractedMetadata {
   bitDepth?: number;
   channels?: number;
   isLossless: boolean;
+  replayGainTrackGain?: number;
+  replayGainAlbumGain?: number;
+  replayGainTrackPeak?: number;
   picture?: {
     format: string;
     data: Buffer;
@@ -40,7 +43,7 @@ export function cleanTitle(rawTitle: string | undefined, filename: string, artis
   }
 
   // 1. Strip nested or residual audio extensions (e.g. "Song.wav.mp3" -> "Song")
-  const extRegex = /\.(mp3|m4a|flac|wav|ogg|opus|aac|alac|aiff|wma)$/i;
+  const extRegex = /\.(mp3|m4a|flac|wav|ogg|opus|aac|alac|aiff|wma|wv|ape|dsf|dff|mka)$/i;
   while (extRegex.test(title)) {
     title = title.replace(extRegex, '').trim();
   }
@@ -208,12 +211,45 @@ export async function parseAudioMetadata(filePath: string, layout?: FolderLayout
       ? common.comment.map((c: any) => (typeof c === 'string' ? c : c?.text ?? '')).filter(Boolean).join('; ') || undefined
       : (common.comment as any) || undefined;
 
-    const codec = format.codec || path.extname(filePath).replace('.', '').toUpperCase();
+    const fileExt = path.extname(filePath).replace('.', '').toLowerCase();
+    const codec = format.codec || fileExt.toUpperCase();
     const bitrate = format.bitrate ? Math.round(format.bitrate / 1000) : undefined;
     const sampleRate = format.sampleRate || undefined;
     const bitDepth = format.bitsPerSample || undefined;
     const channels = format.numberOfChannels || undefined;
-    const isLossless = format.lossless ?? (['flac', 'wav', 'alac', 'aiff'].includes((format.codec || '').toLowerCase()));
+
+    const losslessExtensions = ['flac', 'wav', 'alac', 'aiff', 'wv', 'ape', 'dsf', 'dff'];
+    const isLossless =
+      format.lossless ??
+      (['flac', 'wav', 'alac', 'aiff', 'wavpack', 'monkeys audio', 'dsd'].includes((format.codec || '').toLowerCase()) ||
+        losslessExtensions.includes(fileExt));
+
+    // ReplayGain extraction helper
+    const parseDbGain = (val: any): number | undefined => {
+      if (val === null || val === undefined) return undefined;
+      if (typeof val === 'number') return val;
+      if (typeof val === 'object' && typeof val.dB === 'number') return val.dB;
+      if (typeof val === 'string') {
+        const n = parseFloat(val.replace(/[^\d.-]/g, ''));
+        if (!isNaN(n)) return n;
+      }
+      return undefined;
+    };
+
+    const parsePeakRatio = (val: any): number | undefined => {
+      if (val === null || val === undefined) return undefined;
+      if (typeof val === 'number') return val;
+      if (typeof val === 'object' && typeof val.ratio === 'number') return val.ratio;
+      if (typeof val === 'string') {
+        const n = parseFloat(val);
+        if (!isNaN(n)) return n;
+      }
+      return undefined;
+    };
+
+    const replayGainTrackGain = parseDbGain((common as any).replaygain_track_gain);
+    const replayGainAlbumGain = parseDbGain((common as any).replaygain_album_gain);
+    const replayGainTrackPeak = parsePeakRatio((common as any).replaygain_track_peak);
 
     let picture: { format: string; data: Buffer } | undefined = undefined;
     if (common.picture && common.picture.length > 0) {
@@ -242,6 +278,9 @@ export async function parseAudioMetadata(filePath: string, layout?: FolderLayout
       bitDepth,
       channels,
       isLossless: !!isLossless,
+      replayGainTrackGain,
+      replayGainAlbumGain,
+      replayGainTrackPeak,
       picture,
     };
   } catch {
@@ -249,7 +288,7 @@ export async function parseAudioMetadata(filePath: string, layout?: FolderLayout
     const artist = folderArtist || 'Unknown Artist';
     const title = cleanFallbackTitle(filename, artist);
     const ext = path.extname(filePath).replace('.', '').toUpperCase();
-    const isLossless = ['FLAC', 'WAV', 'ALAC', 'AIFF'].includes(ext);
+    const isLossless = ['FLAC', 'WAV', 'ALAC', 'AIFF', 'WV', 'APE', 'DSF', 'DFF'].includes(ext);
     const parsedNums = parseVinylOrTrackNumber(filename);
 
     return {

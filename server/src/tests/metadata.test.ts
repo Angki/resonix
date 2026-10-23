@@ -37,6 +37,11 @@ describe('Metadata Cleaning and Parsing', () => {
     it('strips trailing audio extensions', () => {
       expect(cleanTitle('Track.wav.mp3', 'Track.wav.mp3')).toBe('Track');
       expect(cleanTitle('Track.flac', 'Track.flac')).toBe('Track');
+      expect(cleanTitle('Track.wv', 'Track.wv')).toBe('Track');
+      expect(cleanTitle('Track.ape', 'Track.ape')).toBe('Track');
+      expect(cleanTitle('Track.dsf', 'Track.dsf')).toBe('Track');
+      expect(cleanTitle('Track.dff', 'Track.dff')).toBe('Track');
+      expect(cleanTitle('Track.mka', 'Track.mka')).toBe('Track');
     });
   });
 

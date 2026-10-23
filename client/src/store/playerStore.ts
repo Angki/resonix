@@ -54,11 +54,12 @@ interface PlayerState {
   resetListenedSeconds: () => void;
 }
 
-const STORAGE_KEY = 'black_library_player_state';
+const STORAGE_KEY = 'resonix_player_state';
+const LEGACY_STORAGE_KEY = 'black_library_player_state';
 
 function loadPersistedState(): Partial<PlayerState> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return {

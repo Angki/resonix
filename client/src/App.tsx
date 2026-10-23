@@ -77,22 +77,15 @@ const MainLayout: React.FC = () => {
 
   const defaultRootInitialized = React.useRef(false);
 
-  // Set Raw Black Metal library as default when the application starts
+  // Select the first available library root if none selected
   useEffect(() => {
     if (!defaultRootInitialized.current && roots && roots.length > 0) {
-      const rawRoot = roots.find(
-        (r) =>
-          r.name.toLowerCase().includes('raw black metal') ||
-          r.path.toLowerCase().includes('raw black metal')
-      );
-      if (rawRoot) {
-        selectCollection(rawRoot.id, rawRoot.name);
-      } else if (roots[0]) {
+      if (!selectedRootId) {
         selectCollection(roots[0].id, roots[0].name);
       }
       defaultRootInitialized.current = true;
     }
-  }, [roots, selectCollection]);
+  }, [roots, selectCollection, selectedRootId]);
 
   // Check auth and setup requirements on startup
   useEffect(() => {

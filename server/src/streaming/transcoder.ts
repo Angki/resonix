@@ -50,6 +50,21 @@ export function startAudioTranscode(options: TranscodeOptions): {
   const binary = config.FFMPEG_PATH || 'ffmpeg';
   const bitrate = options.bitrateKbps || 320;
   const startSec = Math.max(0, options.startSeconds || 0);
+  const targetFormat = options.format || 'mp3';
+
+  let codec = 'libmp3lame';
+  let containerFormat = 'mp3';
+  let contentType = 'audio/mpeg';
+
+  if (targetFormat === 'opus') {
+    codec = 'libopus';
+    containerFormat = 'opus';
+    contentType = 'audio/opus';
+  } else if (targetFormat === 'aac') {
+    codec = 'aac';
+    containerFormat = 'adts';
+    contentType = 'audio/aac';
+  }
 
   // Array of arguments to prevent shell interpolation
   const args: string[] = [];
@@ -61,9 +76,9 @@ export function startAudioTranscode(options: TranscodeOptions): {
   args.push(
     '-i', options.filePath,
     '-vn',
-    '-c:a', 'libmp3lame',
+    '-c:a', codec,
     '-b:a', `${bitrate}k`,
-    '-f', 'mp3',
+    '-f', containerFormat,
     'pipe:1'
   );
 
@@ -109,6 +124,6 @@ export function startAudioTranscode(options: TranscodeOptions): {
   return {
     stream: proc.stdout,
     kill,
-    contentType: 'audio/mpeg',
+    contentType,
   };
 }

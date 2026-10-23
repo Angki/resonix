@@ -11,7 +11,7 @@ import { lyricsService } from '../lyrics/lyricsService.js';
 
 const SUBSONIC_API_VERSION = '1.16.1';
 const SERVER_VERSION = '1.0.0';
-const SERVER_TYPE = 'black-library';
+const SERVER_TYPE = 'resonix';
 
 const FALLBACK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="#18181b">
   <rect width="256" height="256" fill="#18181b"/>
@@ -1321,6 +1321,29 @@ export async function subsonicRoutes(app: FastifyInstance) {
         await prisma.playlist.delete({ where: { id: playlistId } });
 
         return sendSubsonicResponse(reply, format);
+      }
+
+      case 'jukeboxcontrol': {
+        const action = (params.action || 'status').toLowerCase();
+        const jukeboxStatus = {
+          currentIndex: 0,
+          playing: false,
+          gain: typeof params.gain === 'string' ? parseFloat(params.gain) : 1.0,
+          position: 0,
+        };
+
+        if (action === 'get') {
+          return sendSubsonicResponse(reply, format, {
+            jukeboxPlaylist: {
+              ...jukeboxStatus,
+              entry: [],
+            },
+          });
+        }
+
+        return sendSubsonicResponse(reply, format, {
+          jukeboxStatus,
+        });
       }
 
       default: {

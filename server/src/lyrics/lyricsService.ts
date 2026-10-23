@@ -108,7 +108,8 @@ class LyricsService {
             hasSyncedLyrics: parsed.hasSynced,
             lines: parsed.lines,
             plainLyrics: parsed.plainLyrics || content,
-          };
+            rawContent: content,
+          } as LyricsResponse & { rawContent?: string };
         }
       }
     } catch (err) {
@@ -133,7 +134,8 @@ class LyricsService {
             hasSyncedLyrics: parsed.hasSynced,
             lines: parsed.lines,
             plainLyrics: parsed.plainLyrics || text,
-          };
+            rawContent: text,
+          } as LyricsResponse & { rawContent?: string };
         }
       }
     } catch {
@@ -174,7 +176,7 @@ class LyricsService {
       const url = `https://lrclib.net/api/get?${q.toString()}`;
       const res = await fetch(url, {
         headers: {
-          'User-Agent': 'BlackLibraryMusic/1.0 (+https://github.com/blacklibrary)',
+          'User-Agent': 'ResonixAudioPlayer/1.0 (+https://github.com/Angki/resonix)',
         },
         signal: controller.signal,
       });
@@ -271,7 +273,7 @@ class LyricsService {
     if (sidecar) {
       // Save to cache for uniform fast access
       try {
-        fs.writeFileSync(this.getCachePath(trackId), sidecar.plainLyrics || '', 'utf8');
+        fs.writeFileSync(this.getCachePath(trackId), (sidecar as any).rawContent || sidecar.plainLyrics || '', 'utf8');
       } catch {}
       return sidecar;
     }
@@ -279,6 +281,9 @@ class LyricsService {
     // 3. Embedded tags
     const embedded = await this.checkEmbedded(track.fullPath);
     if (embedded) {
+      try {
+        fs.writeFileSync(this.getCachePath(trackId), (embedded as any).rawContent || embedded.plainLyrics || '', 'utf8');
+      } catch {}
       return embedded;
     }
 

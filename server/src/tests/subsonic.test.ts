@@ -39,7 +39,7 @@ describe('OpenSubsonic API Protocol Suite', () => {
         'subsonic-response': {
           status: 'ok',
           version: '1.16.1',
-          type: 'black-library',
+          type: 'resonix',
           serverVersion: '1.0.0',
           openSubsonic: true,
           ping: {},
@@ -56,7 +56,7 @@ describe('OpenSubsonic API Protocol Suite', () => {
         'subsonic-response': {
           status: 'failed',
           version: '1.16.1',
-          type: 'black-library',
+          type: 'resonix',
           serverVersion: '1.0.0',
           openSubsonic: true,
           error: {
@@ -92,6 +92,27 @@ describe('OpenSubsonic API Protocol Suite', () => {
       };
       expect(payload['subsonic-response'].lyrics.artist).toBe('Darkthrone');
       expect(payload['subsonic-response'].lyrics.content).toContain('cold');
+    });
+
+    it('formats Jukebox status and playlist response properly', () => {
+      const jukeboxPayload = {
+        'subsonic-response': {
+          status: 'ok',
+          version: '1.16.1',
+          type: 'resonix',
+          serverVersion: '1.0.0',
+          openSubsonic: true,
+          jukeboxStatus: {
+            currentIndex: 0,
+            playing: false,
+            gain: 1.0,
+            position: 0,
+          },
+        },
+      };
+
+      expect(jukeboxPayload['subsonic-response'].jukeboxStatus.playing).toBe(false);
+      expect(jukeboxPayload['subsonic-response'].jukeboxStatus.gain).toBe(1.0);
     });
   });
 });

@@ -30,6 +30,11 @@ describe('Path and Security Validation', () => {
     expect(isSupportedAudio('audio.m4a')).toBe(true);
     expect(isSupportedAudio('sound.wav')).toBe(true);
     expect(isSupportedAudio('track.opus')).toBe(true);
+    expect(isSupportedAudio('album.wv')).toBe(true);
+    expect(isSupportedAudio('cdrip.ape')).toBe(true);
+    expect(isSupportedAudio('sacd.dsf')).toBe(true);
+    expect(isSupportedAudio('master.dff')).toBe(true);
+    expect(isSupportedAudio('live.mka')).toBe(true);
     expect(isSupportedAudio('malicious.exe')).toBe(false);
     expect(isSupportedAudio('script.js')).toBe(false);
     expect(isSupportedAudio('cover.jpg')).toBe(false);

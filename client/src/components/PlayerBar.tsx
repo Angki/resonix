@@ -387,19 +387,30 @@ export const PlayerBar: React.FC = () => {
     });
   }, [isEqEnabled, eqGains]);
 
-  // Update Pre-amp gain
+  // Update Pre-amp gain with ReplayGain loudness normalization
   useEffect(() => {
     const ctx = audioCtxRef.current;
     const preAmpNode = preAmpGainRef.current;
     if (!ctx || !preAmpNode) return;
 
-    const targetFactor = isEqEnabled ? Math.pow(10, eqPreAmp / 20) : 1;
+    let totalGainDb = isEqEnabled ? eqPreAmp : 0;
+    // When normalizer is enabled, apply track ReplayGain or album gain
+    if (isNormalizerEnabled && currentTrack) {
+      const trackGain = currentTrack.replayGainTrackGain ?? currentTrack.replayGainAlbumGain;
+      if (typeof trackGain === 'number' && !isNaN(trackGain)) {
+        // Clamp ReplayGain between -15 dB and +6 dB to avoid extreme clipping
+        const clampedGain = Math.max(-15, Math.min(6, trackGain));
+        totalGainDb += clampedGain;
+      }
+    }
+
+    const targetFactor = Math.pow(10, totalGainDb / 20);
     try {
       preAmpNode.gain.setTargetAtTime(targetFactor, ctx.currentTime, 0.05);
     } catch {
       preAmpNode.gain.value = targetFactor;
     }
-  }, [isEqEnabled, eqPreAmp]);
+  }, [isEqEnabled, eqPreAmp, isNormalizerEnabled, currentTrack]);
 
   // Update Dynamics Compressor (Volume Normalizer) with Make-Up Gain
   useEffect(() => {

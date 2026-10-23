@@ -16,10 +16,15 @@ export const MIME_TYPES: Record<string, string> = {
   '.wav': 'audio/wav',
   '.aiff': 'audio/aiff',
   '.wma': 'audio/x-ms-wma',
+  '.wv': 'audio/x-wavpack',
+  '.ape': 'audio/x-ape',
+  '.dsf': 'audio/x-dsf',
+  '.dff': 'audio/x-dff',
+  '.mka': 'audio/x-matroska',
 };
 
 export async function handleStreamRequest(
-  req: FastifyRequest<{ Params: { trackId: string }; Querystring: { transcode?: string; offset?: string; bitrate?: string } }>,
+  req: FastifyRequest<{ Params: { trackId: string }; Querystring: { transcode?: string; offset?: string; bitrate?: string; format?: string } }>,
   reply: FastifyReply
 ) {
   const { trackId } = req.params;
@@ -45,12 +50,17 @@ export async function handleStreamRequest(
   }
 
   const ext = path.extname(track.fullPath).toLowerCase();
-  const shouldTranscode = req.query.transcode === 'true' || ext === '.wma';
+  const nonBrowserFormats = ['.wma', '.dsf', '.dff', '.ape'];
+  const shouldTranscode = req.query.transcode === 'true' || nonBrowserFormats.includes(ext);
 
   // Transcoded stream path
   if (shouldTranscode) {
+    const rawFormat = (req.query.format || 'mp3').toLowerCase();
+    const validFormat = (['mp3', 'opus', 'aac'].includes(rawFormat) ? rawFormat : 'mp3') as 'mp3' | 'opus' | 'aac';
+    const fallbackContentType = validFormat === 'opus' ? 'audio/opus' : (validFormat === 'aac' ? 'audio/aac' : 'audio/mpeg');
+
     if (req.method === 'HEAD') {
-      reply.raw.setHeader('Content-Type', 'audio/mpeg');
+      reply.raw.setHeader('Content-Type', fallbackContentType);
       reply.raw.setHeader('Content-Disposition', 'inline');
       reply.raw.setHeader('Accept-Ranges', 'none');
       reply.raw.setHeader('X-Transcoded-Stream', 'true');
@@ -65,6 +75,7 @@ export async function handleStreamRequest(
         filePath: track.fullPath,
         startSeconds: startOffset,
         bitrateKbps: bitrate,
+        format: validFormat,
       });
 
       req.raw.on('close', () => {

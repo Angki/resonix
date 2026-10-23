@@ -13,6 +13,11 @@ export const SUPPORTED_AUDIO_EXTENSIONS = new Set([
   '.wav',
   '.aiff',
   '.wma',
+  '.wv',
+  '.ape',
+  '.dsf',
+  '.dff',
+  '.mka',
 ]);
 
 export function normalizePath(p: string): string {
