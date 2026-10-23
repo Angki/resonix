@@ -432,6 +432,7 @@ export type HealthIssueDetail =
 export interface VerifyLibraryFilesResult {
   checked: number;
   limit: number;
+  offset: number;
   limited: boolean;
   missingCount: number;
   missing: Array<{

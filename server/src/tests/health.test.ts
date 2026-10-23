@@ -103,33 +103,41 @@ describe('Library Health diagnostics', () => {
   });
 
   describe('computeHealthScore', () => {
+    const baseline = {
+      totalTracks: 100,
+      totalAlbums: 10,
+      missingGenre: 0,
+      missingYear: 0,
+      missingArtworkAlbums: 0,
+      missingTrackNumber: 0,
+      unavailableTracks: 0,
+      duplicateTracks: 0,
+      splitAlbums: 0,
+      duplicateArtists: 0,
+      suspiciousTracks: 0,
+    };
+
     it('returns 100 for a library without issues', () => {
-      expect(
-        computeHealthScore({
-          totalTracks: 1000,
-          totalAlbums: 100,
-          missingGenre: 0,
-          missingYear: 0,
-          missingArtworkAlbums: 0,
-          missingTrackNumber: 0,
-          unavailableTracks: 0,
-        })
-      ).toBe(100);
+      expect(computeHealthScore({ ...baseline, totalTracks: 1000, totalAlbums: 100 })).toBe(100);
     });
 
     it('weights artwork and unavailable tracks more heavily', () => {
-      const baseline = {
-        totalTracks: 100,
-        totalAlbums: 10,
-        missingGenre: 0,
-        missingYear: 0,
-        missingArtworkAlbums: 0,
-        missingTrackNumber: 0,
-        unavailableTracks: 0,
-      };
       const artworkPenalty = 100 - computeHealthScore({ ...baseline, missingArtworkAlbums: 10 });
       const unavailablePenalty = 100 - computeHealthScore({ ...baseline, unavailableTracks: 10 });
       expect(unavailablePenalty).toBeGreaterThan(artworkPenalty);
+    });
+
+    it('penalizes duplicates, split albums, artist variants and suspicious audio', () => {
+      const duplicatePenalty = 100 - computeHealthScore({ ...baseline, duplicateTracks: 20 });
+      const splitPenalty = 100 - computeHealthScore({ ...baseline, splitAlbums: 10 });
+      const artistPenalty = 100 - computeHealthScore({ ...baseline, duplicateArtists: 20 });
+      const suspiciousPenalty = 100 - computeHealthScore({ ...baseline, suspiciousTracks: 20 });
+
+      expect(duplicatePenalty).toBeGreaterThan(0);
+      expect(splitPenalty).toBeGreaterThan(0);
+      expect(artistPenalty).toBeGreaterThan(0);
+      expect(suspiciousPenalty).toBeGreaterThan(0);
+      expect(splitPenalty).toBeGreaterThan(artistPenalty);
     });
 
     it('clamps the score to zero', () => {
@@ -142,22 +150,16 @@ describe('Library Health diagnostics', () => {
           missingArtworkAlbums: 1000,
           missingTrackNumber: 10000,
           unavailableTracks: 10000,
+          duplicateTracks: 10000,
+          splitAlbums: 1000,
+          duplicateArtists: 1000,
+          suspiciousTracks: 10000,
         })
       ).toBe(0);
     });
 
     it('handles an empty library without dividing by zero', () => {
-      expect(
-        computeHealthScore({
-          totalTracks: 0,
-          totalAlbums: 0,
-          missingGenre: 0,
-          missingYear: 0,
-          missingArtworkAlbums: 0,
-          missingTrackNumber: 0,
-          unavailableTracks: 0,
-        })
-      ).toBe(100);
+      expect(computeHealthScore({ ...baseline, totalTracks: 0, totalAlbums: 0 })).toBe(100);
     });
   });
 });

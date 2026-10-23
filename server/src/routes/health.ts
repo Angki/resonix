@@ -85,6 +85,7 @@ export async function healthRoutes(app: FastifyInstance) {
     const schema = z.object({
       rootId: z.string().optional(),
       limit: z.coerce.number().int().positive().optional(),
+      offset: z.coerce.number().int().min(0).optional(),
     });
     const parsed = schema.safeParse(req.body || {});
     if (!parsed.success) {

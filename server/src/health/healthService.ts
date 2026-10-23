@@ -73,7 +73,6 @@ export const HEALTH_ISSUE_META: Record<
 
 const IGNORED_SETTING_KEY = 'healthIgnoredIssues';
 const IGNORED_CACHE_MS = 5000;
-const MAX_IGNORED_IDS_PER_QUERY = 500;
 
 export interface IgnoredHealthIssue {
   type: HealthIssueType;
@@ -141,13 +140,21 @@ export function computeHealthScore(params: {
   missingArtworkAlbums: number;
   missingTrackNumber: number;
   unavailableTracks: number;
+  duplicateTracks: number;
+  splitAlbums: number;
+  duplicateArtists: number;
+  suspiciousTracks: number;
 }): number {
   const penalty =
     params.missingGenre * 0.5 +
     params.missingYear * 0.5 +
     params.missingArtworkAlbums * 2 +
     params.missingTrackNumber * 0.5 +
-    params.unavailableTracks * 3;
+    params.unavailableTracks * 3 +
+    params.duplicateTracks * 0.5 +
+    params.splitAlbums * 1 +
+    params.duplicateArtists * 0.25 +
+    params.suspiciousTracks * 0.5;
   const denominator = Math.max(1, params.totalTracks + params.totalAlbums);
   return Math.max(0, Math.min(100, Math.round(100 - (penalty / denominator) * 100)));
 }
@@ -283,18 +290,16 @@ function countIgnoredByType(ignored: IgnoredHealthIssue[]): Record<string, numbe
   return counts;
 }
 
-function ignoredSignatures(ignored: IgnoredHealthIssue[], type: HealthIssueType): string[] {
-  return ignored
-    .filter((entry) => entry.type === type)
-    .map((entry) => entry.signature)
-    .slice(0, MAX_IGNORED_IDS_PER_QUERY);
-}
-
-function notInClause(column: string, ids: string[]): { sql: string; params: string[] } {
-  if (ids.length === 0) return { sql: '', params: [] };
+function ignoredExclusion(
+  column: string,
+  ignored: IgnoredHealthIssue[],
+  type: HealthIssueType
+): { sql: string; params: string[] } {
+  const signatures = ignored.filter((entry) => entry.type === type).map((entry) => entry.signature);
+  if (signatures.length === 0) return { sql: '', params: [] };
   return {
-    sql: ` AND ${column} NOT IN (${ids.map(() => '?').join(',')})`,
-    params: ids,
+    sql: ` AND ${column} NOT IN (SELECT value FROM json_each(?))`,
+    params: [JSON.stringify(signatures)],
   };
 }
 
@@ -444,8 +449,8 @@ export async function getHealthOverview(force = false) {
   const ignoredSet = ignoredKeySet(ignored);
   const ignoredByType = countIgnoredByType(ignored);
 
-  const metadataGapIgnored = notInClause('t.id', ignoredSignatures(ignored, 'metadata-gaps'));
-  const suspiciousIgnored = notInClause('t.id', ignoredSignatures(ignored, 'suspicious-audio'));
+  const metadataGapIgnored = ignoredExclusion('t.id', ignored, 'metadata-gaps');
+  const suspiciousIgnored = ignoredExclusion('t.id', ignored, 'suspicious-audio');
 
   const [
     totalTracks,
@@ -540,6 +545,10 @@ export async function getHealthOverview(force = false) {
     missingArtworkAlbums,
     missingTrackNumber,
     unavailableTracks,
+    duplicateTracks: duplicateTrackCount,
+    splitAlbums: splitAlbumCount,
+    duplicateArtists: duplicateArtistCount,
+    suspiciousTracks,
   });
 
   const issues = [
@@ -689,8 +698,7 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
   }
 
   if (type === 'missing-artwork') {
-    const ignoredIds = ignoredSignatures(ignored, type);
-    const exclude = notInClause('a.id', ignoredIds);
+    const exclude = ignoredExclusion('a.id', ignored, type);
     const [countRows, albumRows] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(
         `SELECT COUNT(*) AS cnt FROM Album a WHERE ${MISSING_ARTWORK_WHERE}${exclude.sql}`,
@@ -973,8 +981,7 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
   }
 
   if (type === 'metadata-gaps') {
-    const ignoredIds = ignoredSignatures(ignored, type);
-    const exclude = notInClause('t.id', ignoredIds);
+    const exclude = ignoredExclusion('t.id', ignored, type);
     const [countRows, breakdownRows, trackRows] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(
         `SELECT COUNT(*) AS cnt FROM Track t WHERE ${METADATA_GAP_WHERE}${exclude.sql}`,
@@ -1022,8 +1029,7 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
   }
 
   if (type === 'suspicious-audio') {
-    const ignoredIds = ignoredSignatures(ignored, type);
-    const exclude = notInClause('t.id', ignoredIds);
+    const exclude = ignoredExclusion('t.id', ignored, type);
     const [countRows, trackRows] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(
         `SELECT COUNT(*) AS cnt FROM Track t WHERE ${SUSPICIOUS_AUDIO_WHERE}${exclude.sql}`,
@@ -1059,10 +1065,15 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
   throw new Error(`Unsupported issue type: ${type}`);
 }
 
-export async function verifyLibraryFiles(options: { rootId?: string; limit?: number } = {}) {
+export async function verifyLibraryFiles(
+  options: { rootId?: string; limit?: number; offset?: number } = {}
+) {
   const limit = clampLimit(options.limit, 10000, 50000);
+  const offset = clampOffset(options.offset);
   const rootClause = options.rootId ? ' AND t.rootId = ?' : '';
-  const params: any[] = options.rootId ? [options.rootId, limit] : [limit];
+  const params: any[] = options.rootId
+    ? [options.rootId, limit, offset]
+    : [limit, offset];
 
   const rows = await prisma.$queryRawUnsafe<any[]>(
     `
@@ -1078,8 +1089,8 @@ export async function verifyLibraryFiles(options: { rootId?: string; limit?: num
     FROM Track t
     LEFT JOIN LibraryRoot r ON r.id = t.rootId
     WHERE t.isUnavailable = 0${rootClause}
-    ORDER BY t.rootId ASC, t.artistName ASC, t.albumTitle ASC, t.trackNumber ASC
-    LIMIT ?
+    ORDER BY t.rootId ASC, t.artistName ASC, t.albumTitle ASC, t.trackNumber ASC, t.id ASC
+    LIMIT ? OFFSET ?
     `,
     ...params
   );
@@ -1122,6 +1133,7 @@ export async function verifyLibraryFiles(options: { rootId?: string; limit?: num
   return {
     checked: rows.length,
     limit,
+    offset,
     limited: rows.length >= limit,
     missingCount,
     missing,

@@ -243,7 +243,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  verifyLibraryFiles: (body: { rootId?: string; limit?: number } = {}) =>
+  verifyLibraryFiles: (body: { rootId?: string; limit?: number; offset?: number } = {}) =>
     fetchJson<VerifyLibraryFilesResult>('/api/library/health/verify', {
       method: 'POST',
       body: JSON.stringify(body),

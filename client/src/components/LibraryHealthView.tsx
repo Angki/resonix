@@ -49,7 +49,8 @@ import {
 } from '../types';
 
 const PAGE_SIZE = 25;
-const VERIFY_LIMIT = 10000;
+const VERIFY_PAGE_SIZE = 25000;
+const VERIFY_MISSING_LIMIT = 500;
 
 function formatDuration(seconds: number): string {
   if (!seconds || !Number.isFinite(seconds)) return '--:--';
@@ -764,6 +765,11 @@ export const LibraryHealthView: React.FC = () => {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [verifyResult, setVerifyResult] = useState<VerifyLibraryFilesResult | null>(null);
+  const [verifyProgress, setVerifyProgress] = useState<{
+    rootName: string;
+    checked: number;
+    total: number;
+  } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const currentUser = useUiStore((state) => state.currentUser);
@@ -829,12 +835,57 @@ export const LibraryHealthView: React.FC = () => {
   });
 
   const verifyMutation = useMutation({
-    mutationFn: () => api.verifyLibraryFiles({ limit: VERIFY_LIMIT }),
+    mutationFn: async (): Promise<VerifyLibraryFilesResult> => {
+      const roots = overview?.roots ?? [];
+      const targets = roots.length
+        ? roots.map((root) => ({ id: root.id as string | undefined, name: root.name }))
+        : [{ id: undefined as string | undefined, name: 'all library roots' }];
+      const total = overview?.totals.tracks ?? 0;
+      const result: VerifyLibraryFilesResult = {
+        checked: 0,
+        limit: VERIFY_PAGE_SIZE,
+        offset: 0,
+        limited: false,
+        missingCount: 0,
+        missing: [],
+        roots,
+        mutated: false,
+      };
+
+      for (const target of targets) {
+        let offset = 0;
+        while (true) {
+          setVerifyProgress({ rootName: target.name, checked: result.checked, total });
+          const page = await api.verifyLibraryFiles({
+            rootId: target.id,
+            limit: VERIFY_PAGE_SIZE,
+            offset,
+          });
+          result.checked += page.checked;
+          result.missingCount += page.missingCount;
+          result.roots = page.roots;
+          if (result.missing.length < VERIFY_MISSING_LIMIT) {
+            result.missing.push(
+              ...page.missing.slice(0, VERIFY_MISSING_LIMIT - result.missing.length)
+            );
+          }
+          offset += page.checked;
+          if (!page.limited || page.checked === 0) break;
+        }
+      }
+
+      setVerifyProgress({ rootName: 'all library roots', checked: result.checked, total });
+      return result;
+    },
     onSuccess: (result) => {
       setActionError(null);
       setVerifyResult(result);
+      setVerifyProgress(null);
     },
-    onError: (error: any) => setActionError(error?.message || 'File verification failed'),
+    onError: (error: any) => {
+      setVerifyProgress(null);
+      setActionError(error?.message || 'File verification failed');
+    },
   });
 
   const scanMutation = useMutation({
@@ -893,6 +944,10 @@ export const LibraryHealthView: React.FC = () => {
   const scanRunning = Boolean(overview?.scan?.isRunning);
   const issueCount = overview?.issues ?? [];
   const activeIssueCount = issueCount.filter((issue) => issue.count > 0).length;
+  const verifyPercent =
+    verifyProgress && verifyProgress.total > 0
+      ? Math.min(100, Math.round((verifyProgress.checked / verifyProgress.total) * 100))
+      : 0;
 
   useEffect(() => {
     if (!scanRunning) return;
@@ -942,7 +997,7 @@ export const LibraryHealthView: React.FC = () => {
             onClick={() => verifyMutation.mutate()}
             disabled={verifyMutation.isPending}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-charcoal-700 bg-charcoal-850 text-[10.5px] font-mono text-zinc-300 hover:bg-charcoal-800 hover:border-cyan-800 transition disabled:opacity-50"
-            title="Check up to 10,000 source files for existence on disk. Read-only."
+            title="Check every source file for existence on disk, page by page. Read-only."
           >
             {verifyMutation.isPending ? <Loader2 size={12} className="animate-spin" /> : <HardDrive size={12} />}
             Verify files
@@ -977,6 +1032,36 @@ export const LibraryHealthView: React.FC = () => {
         </div>
       )}
 
+      {/* Full-library verification progress */}
+      {verifyMutation.isPending && (
+        <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-lg bg-charcoal-850 border border-charcoal-800">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-300">
+            <Loader2 size={13} className="animate-spin text-cyan-400 shrink-0" />
+            <span className="font-mono">
+              Verifying {verifyProgress?.rootName ?? 'library'} —{' '}
+              {verifyProgress ? (
+                <>
+                  {(verifyProgress.checked ?? 0).toLocaleString()}
+                  {verifyProgress.total > 0 ? ` / ${verifyProgress.total.toLocaleString()}` : ''} files
+                  {verifyProgress.total > 0 ? ` (${verifyPercent}%)` : ''}
+                </>
+              ) : (
+                'preparing…'
+              )}
+            </span>
+          </div>
+          <div className="h-1 rounded-full bg-charcoal-800 overflow-hidden">
+            <div
+              className="h-full bg-cyan-500 transition-all duration-300"
+              style={{ width: `${verifyPercent}%` }}
+            />
+          </div>
+          <span className="text-[9.5px] font-mono text-zinc-500">
+            Read-only existence check. Large libraries can take a while.
+          </span>
+        </div>
+      )}
+
       {/* Overview stats */}
       {overviewQuery.isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -993,7 +1078,10 @@ export const LibraryHealthView: React.FC = () => {
         <>
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.25fr)_minmax(0,2fr)] gap-3">
             {/* Health score */}
-            <div className="bg-charcoal-850/80 border border-charcoal-800 rounded-xl p-4 backdrop-blur-md flex items-center gap-4">
+            <div
+              className="bg-charcoal-850/80 border border-charcoal-800 rounded-xl p-4 backdrop-blur-md flex items-center gap-4"
+              title="Weighted score covering metadata completeness, artwork, availability, duplicates, split albums, artist variants and suspicious audio"
+            >
               <div
                 className="relative w-20 h-20 rounded-full shrink-0"
                 style={{
@@ -1172,9 +1260,10 @@ export const LibraryHealthView: React.FC = () => {
           </div>
           <div className="p-3.5 space-y-2">
             <p className="text-[10.5px] text-zinc-500 font-mono">
-              Checked {verifyResult.checked.toLocaleString()} files
-              {verifyResult.limited ? ` (capped at ${verifyResult.limit.toLocaleString()})` : ''}. No files were
-              modified — this is an existence check only.
+              Checked {verifyResult.checked.toLocaleString()} files across{' '}
+              {verifyResult.roots.length.toLocaleString()} root
+              {verifyResult.roots.length === 1 ? '' : 's'}. No files were modified — this is an existence check
+              only.
             </p>
             {verifyResult.missing.length > 0 && (
               <div className="rounded-lg border border-charcoal-800 overflow-hidden">
@@ -1190,7 +1279,7 @@ export const LibraryHealthView: React.FC = () => {
                 </div>
                 {verifyResult.missing.length > 20 && (
                   <div className="px-3 py-1.5 text-[9.5px] font-mono text-zinc-500 border-t border-charcoal-800">
-                    Showing first 20 of {verifyResult.missing.length} missing files
+                    Showing first 20 of {verifyResult.missingCount.toLocaleString()} missing files
                   </div>
                 )}
               </div>
