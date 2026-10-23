@@ -348,7 +348,7 @@ async function getRootHealth(): Promise<RootHealth[]> {
   });
 }
 
-function formatHealthTrack(row: any) {
+export function formatHealthTrack(row: any) {
   return {
     id: row.id,
     rootId: row.rootId,
@@ -477,14 +477,17 @@ export async function getHealthOverview(force = false) {
       where: { isUnavailable: false },
       _sum: { duration: true, fileSize: true },
     }),
-    prisma.$queryRawUnsafe<any[]>(`
+    prisma.$queryRawUnsafe<any[]>(
+      `
       SELECT
         COALESCE(SUM(CASE WHEN t.genre IS NULL OR TRIM(t.genre) = '' THEN 1 ELSE 0 END), 0) AS missingGenre,
         COALESCE(SUM(CASE WHEN t.year IS NULL THEN 1 ELSE 0 END), 0) AS missingYear,
         COALESCE(SUM(CASE WHEN t.trackNumber IS NULL THEN 1 ELSE 0 END), 0) AS missingTrackNumber
       FROM Track t
-      WHERE t.isUnavailable = 0
-    `),
+      WHERE t.isUnavailable = 0${metadataGapIgnored.sql}
+      `,
+      ...metadataGapIgnored.params
+    ),
     prisma.$queryRawUnsafe<any[]>(
       `SELECT COUNT(*) AS cnt FROM Track t WHERE ${METADATA_GAP_WHERE}${metadataGapIgnored.sql}`,
       ...metadataGapIgnored.params
@@ -987,14 +990,17 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
         `SELECT COUNT(*) AS cnt FROM Track t WHERE ${METADATA_GAP_WHERE}${exclude.sql}`,
         ...exclude.params
       ),
-      prisma.$queryRawUnsafe<any[]>(`
+      prisma.$queryRawUnsafe<any[]>(
+        `
         SELECT
           COALESCE(SUM(CASE WHEN t.genre IS NULL OR TRIM(t.genre) = '' THEN 1 ELSE 0 END), 0) AS missingGenre,
           COALESCE(SUM(CASE WHEN t.year IS NULL THEN 1 ELSE 0 END), 0) AS missingYear,
           COALESCE(SUM(CASE WHEN t.trackNumber IS NULL THEN 1 ELSE 0 END), 0) AS missingTrackNumber
         FROM Track t
-        WHERE t.isUnavailable = 0
-      `),
+        WHERE t.isUnavailable = 0${exclude.sql}
+        `,
+        ...exclude.params
+      ),
       prisma.$queryRawUnsafe<any[]>(
         `
         SELECT t.*, r.name AS rootName

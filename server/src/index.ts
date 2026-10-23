@@ -13,6 +13,8 @@ import { authenticate } from './auth.js';
 import { initializeBootstrapToken } from './bootstrap.js';
 import { processScrobbleQueue } from './lastfm/api.js';
 import { startLibraryWatcher, stopLibraryWatcher } from './library/watcher.js';
+import { healthEvents } from './health/events.js';
+import { captureHealthSnapshot } from './health/snapshots.js';
 
 import { authRoutes } from './routes/auth.js';
 import { libraryRoutes } from './routes/library.js';
@@ -130,6 +132,12 @@ app.register(lyricsRoutes, { prefix: '/api/lyrics' });
 app.register(smartPlaylistsRoutes, { prefix: '/api/smart-playlists' });
 app.register(healthRoutes, { prefix: '/api/library' });
 app.register(subsonicRoutes, { prefix: '/rest' });
+
+healthEvents.on('scan-completed', (event) => {
+  captureHealthSnapshot('scan', event).catch((err) => {
+    console.warn('[Health] Failed to capture post-scan snapshot:', err);
+  });
+});
 
 // Static Frontend Serving in Production
 const publicPath = path.resolve(__dirname, '../public');

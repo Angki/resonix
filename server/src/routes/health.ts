@@ -9,6 +9,13 @@ import {
   unignoreHealthIssues,
   verifyLibraryFiles,
 } from '../health/healthService.js';
+import { captureHealthSnapshot, getHealthSnapshots, MAX_HEALTH_SNAPSHOTS } from '../health/snapshots.js';
+import { verifyArtworkIntegrity } from '../health/artworkIntegrity.js';
+import {
+  getContentScanState,
+  requestContentScanCancellation,
+  startContentDuplicateScan,
+} from '../health/contentScan.js';
 
 export async function healthRoutes(app: FastifyInstance) {
   app.get('/health/overview', async (req) => {
@@ -93,5 +100,46 @@ export async function healthRoutes(app: FastifyInstance) {
     }
 
     return verifyLibraryFiles(parsed.data);
+  });
+
+  app.get('/health/snapshots', async () => {
+    const snapshots = await getHealthSnapshots(true);
+    return { snapshots, max: MAX_HEALTH_SNAPSHOTS };
+  });
+
+  app.post('/health/snapshots', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to capture health snapshots' });
+    }
+    return captureHealthSnapshot('manual');
+  });
+
+  app.post('/health/verify-artwork', async (req, reply) => {
+    const schema = z.object({
+      limit: z.coerce.number().int().positive().optional(),
+      offset: z.coerce.number().int().min(0).optional(),
+    });
+    const parsed = schema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return reply.status(400).send({ error: parsed.error.issues[0].message });
+    }
+
+    return verifyArtworkIntegrity(parsed.data);
+  });
+
+  app.get('/health/deep-scan', async () => getContentScanState());
+
+  app.post('/health/deep-scan', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to run a deep duplicate scan' });
+    }
+    return startContentDuplicateScan();
+  });
+
+  app.post('/health/deep-scan/cancel', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to cancel a deep duplicate scan' });
+    }
+    return { success: requestContentScanCancellation() };
   });
 }

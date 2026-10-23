@@ -20,6 +20,9 @@ export interface Track {
   bitDepth?: number;
   channels?: number;
   isLossless: boolean;
+  replayGainTrackGain?: number | null;
+  replayGainAlbumGain?: number | null;
+  replayGainTrackPeak?: number | null;
   artistId?: string;
   artistName: string;
   albumId?: string;
@@ -447,6 +450,94 @@ export interface VerifyLibraryFilesResult {
   }>;
   roots: HealthRootStatus[];
   mutated: false;
+}
+
+export interface HealthSnapshot {
+  id: string;
+  capturedAt: string;
+  reason: 'scan' | 'manual';
+  score: number;
+  totals: {
+    tracks: number;
+    albums: number;
+    artists: number;
+  };
+  metadata: {
+    missingGenre: number;
+    missingYear: number;
+    missingTrackNumber: number;
+    missingArtworkAlbums: number;
+    unavailableTracks: number;
+  };
+  issues: Record<string, number>;
+  ignoredTotal: number;
+  scan?: {
+    cancelled: boolean;
+    errorsCount: number;
+    tracksAdded: number;
+    tracksUpdated: number;
+  };
+}
+
+export interface CaptureHealthSnapshotResult {
+  stored: boolean;
+  snapshot: HealthSnapshot | null;
+  total: number;
+}
+
+export interface BrokenArtwork {
+  albumId: string;
+  albumTitle: string;
+  year: number | null;
+  artistId: string | null;
+  artistName: string | null;
+  artworkId: string;
+  source: string;
+  mimeType: string;
+  path: string | null;
+  reason: 'missing-file' | 'empty-file' | 'unreadable';
+}
+
+export interface ArtworkIntegrityResult {
+  total: number;
+  checked: number;
+  limit: number;
+  offset: number;
+  limited: boolean;
+  brokenCount: number;
+  broken: BrokenArtwork[];
+  mutated: false;
+}
+
+export type ContentScanPhase = 'idle' | 'indexing' | 'verifying' | 'complete' | 'cancelled';
+
+export interface ContentScanTrack extends Track {
+  rootName: string | null;
+}
+
+export interface ContentDuplicateGroup {
+  signature: string;
+  matchType: 'exact' | 'signature';
+  trackCount: number;
+  truncated: boolean;
+  totalBytes: number;
+  tracks: ContentScanTrack[];
+}
+
+export interface ContentScanState {
+  isRunning: boolean;
+  phase: ContentScanPhase;
+  startedAt: string | null;
+  finishedAt: string | null;
+  totalTracks: number;
+  processedTracks: number;
+  candidateGroups: number;
+  groupsFound: number;
+  verifiedGroups: number;
+  errorCount: number;
+  errors: string[];
+  groups: ContentDuplicateGroup[];
+  truncated: boolean;
 }
 
 export interface LibraryAuditResult {

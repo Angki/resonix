@@ -1,4 +1,4 @@
-import { Track, Artist, Album, Playlist, ScanStatus, User, ExternalPlaylistCandidate, MusicBeeCandidate, ArtistListItem, ArtistDetail, ArtistBatchStatus, LyricsData, SmartPlaylistPreset, SmartPlaylistDetail, SimilarArtistsResponse, AlbumScan, LibraryAuditResult, LibraryHealthOverview, HealthIssueType, HealthIssueDetail, IgnoredHealthIssue, VerifyLibraryFilesResult } from '../types';
+import { Track, Artist, Album, Playlist, ScanStatus, User, ExternalPlaylistCandidate, MusicBeeCandidate, ArtistListItem, ArtistDetail, ArtistBatchStatus, LyricsData, SmartPlaylistPreset, SmartPlaylistDetail, SimilarArtistsResponse, AlbumScan, LibraryAuditResult, LibraryHealthOverview, HealthIssueType, HealthIssueDetail, IgnoredHealthIssue, VerifyLibraryFilesResult, HealthSnapshot, CaptureHealthSnapshotResult, ArtworkIntegrityResult, ContentScanState } from '../types';
 
 async function fetchJson<T>(url: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
@@ -247,6 +247,29 @@ export const api = {
     fetchJson<VerifyLibraryFilesResult>('/api/library/health/verify', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+  getHealthSnapshots: () =>
+    fetchJson<{ snapshots: HealthSnapshot[]; max: number }>('/api/library/health/snapshots'),
+  captureHealthSnapshot: () =>
+    fetchJson<CaptureHealthSnapshotResult>('/api/library/health/snapshots', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  verifyArtworkIntegrity: (body: { limit?: number; offset?: number } = {}) =>
+    fetchJson<ArtworkIntegrityResult>('/api/library/health/verify-artwork', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getContentScanStatus: () => fetchJson<ContentScanState>('/api/library/health/deep-scan'),
+  startContentScan: () =>
+    fetchJson<ContentScanState>('/api/library/health/deep-scan', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }),
+  cancelContentScan: () =>
+    fetchJson<{ success: boolean }>('/api/library/health/deep-scan/cancel', {
+      method: 'POST',
+      body: JSON.stringify({}),
     }),
 
   // Helpers

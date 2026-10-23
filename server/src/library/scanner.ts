@@ -6,6 +6,7 @@ import { normalizePath, isSupportedAudio } from './paths.js';
 import { parseAudioMetadata, ExtractedMetadata } from './metadata.js';
 import { findFolderArtwork, findFolderArtworkInDir, getOrCreateArtworkRecord } from './artwork.js';
 import { parseFolderLayout, buildAlbumFolderKey, FolderLayout } from './folderLayout.js';
+import { healthEvents } from '../health/events.js';
 
 export interface ScanStatus {
   isRunning: boolean;
@@ -459,6 +460,14 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
     } finally {
       activeScan.isRunning = false;
       activeScan.finishedAt = new Date();
+      healthEvents.emit('scan-completed', {
+        startedAt: activeScan.startedAt,
+        finishedAt: activeScan.finishedAt,
+        cancelled: activeScan.isCancelled,
+        errorsCount: activeScan.errorsCount,
+        tracksAdded: activeScan.tracksAdded,
+        tracksUpdated: activeScan.tracksUpdated,
+      });
     }
   })();
 
