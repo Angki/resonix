@@ -19,13 +19,16 @@ services:
       - NODE_ENV=production
       - HOST=0.0.0.0
       - PORT=3000
-      - APP_BASE_URL=http://localhost:3000
-      - SESSION_SECRET=change_me_to_a_secure_random_string_min_32_chars!
-      - CREDENTIAL_ENCRYPTION_KEY=change_me_to_another_secure_key_min_32_chars!
+      - APP_BASE_URL=${APP_BASE_URL:-http://localhost:3000}
+      # Required: generate with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+      - SESSION_SECRET=${SESSION_SECRET:?SESSION_SECRET is required}
+      - CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY:?CREDENTIAL_ENCRYPTION_KEY is required}
       - DATABASE_URL=file:/data/library.db
       - LIBRARY_ROOTS_JSON=["/music"]
       - PLAYLIST_IMPORT_PATH=/data/playlists
-      - DEPLOYMENT_PROFILE=PERSONAL
+      - DEPLOYMENT_PROFILE=${DEPLOYMENT_PROFILE:-PERSONAL}
+      - TRUST_PROXY=${TRUST_PROXY:-false}
+      - BACKUP_RETENTION=${BACKUP_RETENTION:-7}
       # Optional: Last.fm Scrobbler Integration
       # - LASTFM_API_KEY=your_api_key
       # - LASTFM_API_SECRET=your_api_secret
@@ -38,11 +41,15 @@ services:
       # Persistent application state (SQLite database, cached artwork, scrobble queues)
       - resonix-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/api/ready"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 15s
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     logging:
       driver: "json-file"
       options:

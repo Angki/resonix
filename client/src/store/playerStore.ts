@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { Track } from '../types';
+import { requestSeek } from '../services/playbackBus';
 
 export type RepeatMode = 'off' | 'all' | 'one';
 
@@ -103,6 +104,34 @@ function persistState(state: PlayerState) {
   } catch {
     // ignore
   }
+}
+
+let volumePersistTimer: ReturnType<typeof setTimeout> | null = null;
+let lastVolumePersistAt = 0;
+
+// Volume sliders fire continuously; avoid serializing the entire queue on every event
+function persistVolume(volume: number, isMuted: boolean) {
+  const write = () => {
+    lastVolumePersistAt = Date.now();
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, volume, isMuted }));
+    } catch {
+      // ignore
+    }
+  };
+
+  if (Date.now() - lastVolumePersistAt > 250) {
+    write();
+    return;
+  }
+  if (volumePersistTimer) clearTimeout(volumePersistTimer);
+  volumePersistTimer = setTimeout(() => {
+    volumePersistTimer = null;
+    const state = usePlayerStore.getState();
+    persistVolume(state.volume, state.isMuted);
+  }, 250);
 }
 
 const persisted = loadPersistedState();
@@ -238,11 +267,13 @@ export const usePlayerStore = create<PlayerState>((set, get) => ({
 
   seek: (seconds) => {
     set({ currentTime: seconds });
+    requestSeek(seconds);
   },
 
   setVolume: (volume) => {
-    set({ volume: Math.max(0, Math.min(1, volume)), isMuted: false });
-    persistState(get());
+    const next = Math.max(0, Math.min(1, volume));
+    set({ volume: next, isMuted: false });
+    persistVolume(next, false);
   },
 
   toggleMute: () => {

@@ -46,8 +46,8 @@ LABEL org.opencontainers.image.title="Resonix" \
 
 WORKDIR /app
 
-# Install runtime dependencies: FFmpeg (transcoding) and curl (healthcheck)
-RUN apk add --no-cache ffmpeg curl dumb-init
+# Install runtime dependencies: FFmpeg (transcoding), curl (healthcheck), sqlite (backups)
+RUN apk add --no-cache ffmpeg curl dumb-init sqlite
 
 # Set production environment
 ENV NODE_ENV=production \
@@ -74,6 +74,8 @@ COPY --from=builder /app/server/src/generated ./server/src/generated
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/public ./server/public
 COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/server/docker-entrypoint.sh ./server/docker-entrypoint.sh
+RUN chmod +x ./server/docker-entrypoint.sh
 
 # Create persistent storage directories and assign permissions to non-root node user
 RUN mkdir -p /data /music /app/cache /app/data && \
@@ -85,14 +87,14 @@ EXPOSE 3000
 # Docker volume declarations
 VOLUME ["/music", "/data"]
 
-# Healthcheck probe using the public /api/health endpoint
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://127.0.0.1:3000/api/health || exit 1
+# Readiness probe: verifies the database is migrated and reachable
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -f http://127.0.0.1:3000/api/ready || exit 1
 
 # Switch to unprivileged non-root user
 USER node
 
 # Use dumb-init for proper PID 1 signal forwarding and zombie reaper
-ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/app/server/docker-entrypoint.sh"]
 
 CMD ["node", "server/dist/index.js"]

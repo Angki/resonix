@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
+import compress from '@fastify/compress';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -45,7 +46,8 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 const app = Fastify({
-  trustProxy: true,
+  // Fastify runtime accepts a numeric hop count even though its types omit it
+  trustProxy: config.trustProxy as any,
   logger: {
     level: process.env.NODE_ENV === 'production' ? 'info' : 'warn',
   },
@@ -83,6 +85,12 @@ await app.register(cors, {
   exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'X-Transcoded-Stream', 'X-Transcode-Offset'],
 });
 
+await app.register(compress, {
+  global: true,
+  threshold: 2048,
+  encodings: ['br', 'gzip', 'deflate'],
+});
+
 await app.register(rateLimit, {
   max: 3000,
   timeWindow: '1 minute',
@@ -93,7 +101,7 @@ await app.register(rateLimit, {
   },
 });
 
-// Public Health Check Endpoint for Docker/Kubernetes/monitoring
+// Public liveness endpoint for Docker/Kubernetes/monitoring
 app.get('/api/health', async () => {
   return {
     status: 'healthy',
@@ -101,13 +109,34 @@ app.get('/api/health', async () => {
     service: 'resonix-server',
     version: '1.0.0',
     uptime: Math.round(process.uptime()),
-    database: 'connected',
   };
+});
+
+// Readiness endpoint verifies the database can actually serve requests
+app.get('/api/ready', async (req, reply) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return {
+      status: 'ready',
+      timestamp: new Date().toISOString(),
+      database: 'connected',
+    };
+  } catch (err) {
+    req.log.error({ err }, 'Readiness check failed');
+    return reply.status(503).send({
+      status: 'unavailable',
+      timestamp: new Date().toISOString(),
+      database: 'disconnected',
+    });
+  }
 });
 
 // Authentication hook for /api routes
 app.addHook('onRequest', async (req, reply) => {
   if (req.url === '/api/health' || req.url.startsWith('/api/health?')) {
+    return;
+  }
+  if (req.url === '/api/ready' || req.url.startsWith('/api/ready?')) {
     return;
   }
   if (req.url.startsWith('/api')) {

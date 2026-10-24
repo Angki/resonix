@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanTitle, parseVinylOrTrackNumber } from '../library/metadata.js';
+import { cleanTitle, parseVinylOrTrackNumber, parseReplayGain } from '../library/metadata.js';
 
 describe('Metadata Cleaning and Parsing', () => {
   describe('cleanTitle', () => {
@@ -42,6 +42,38 @@ describe('Metadata Cleaning and Parsing', () => {
       expect(cleanTitle('Track.dsf', 'Track.dsf')).toBe('Track');
       expect(cleanTitle('Track.dff', 'Track.dff')).toBe('Track');
       expect(cleanTitle('Track.mka', 'Track.mka')).toBe('Track');
+    });
+  });
+
+  describe('parseReplayGain', () => {
+    it('parses numeric and object ReplayGain tags', () => {
+      expect(
+        parseReplayGain({
+          replaygain_track_gain: { dB: -7.25 },
+          replaygain_album_gain: { dB: -6.5 },
+          replaygain_track_peak: { ratio: 0.987 },
+        })
+      ).toEqual({ trackGain: -7.25, albumGain: -6.5, trackPeak: 0.987 });
+
+      expect(parseReplayGain({ replaygain_track_gain: 3.5, replaygain_track_peak: 1.2 })).toEqual({
+        trackGain: 3.5,
+        trackPeak: 1.2,
+      });
+    });
+
+    it('parses string ReplayGain values with units', () => {
+      expect(
+        parseReplayGain({
+          replaygain_track_gain: '+2.31 dB',
+          replaygain_album_gain: '-4.80 dB',
+          replaygain_track_peak: '0.999877',
+        })
+      ).toEqual({ trackGain: 2.31, albumGain: -4.8, trackPeak: 0.999877 });
+    });
+
+    it('returns an empty object when tags are missing or invalid', () => {
+      expect(parseReplayGain({})).toEqual({});
+      expect(parseReplayGain({ replaygain_track_gain: 'n/a', replaygain_track_peak: 'loud' })).toEqual({});
     });
   });
 

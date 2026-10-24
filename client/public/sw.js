@@ -1,4 +1,4 @@
-const CACHE_NAME = 'black-library-v5';
+const CACHE_NAME = 'black-library-v6';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -22,7 +22,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) {
+          if (key !== CACHE_NAME && !key.startsWith('audio-cache-')) {
             console.log('[SW] Deleting stale cache:', key);
             return caches.delete(key);
           }

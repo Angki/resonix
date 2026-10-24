@@ -275,6 +275,7 @@ export const api = {
   // Helpers
   getStreamUrl: (trackId: string, transcode: boolean = false) =>
     transcode ? `/api/stream/${trackId}/transcode` : `/api/stream/${trackId}`,
+  getDownloadUrl: (trackId: string) => `/api/stream/${trackId}?download=true`,
   getArtworkUrl: (artworkId?: string, size: 96 | 256 | 512 = 256) =>
     artworkId ? `/api/artwork/${artworkId}?size=${size}` : `/api/artwork/unknown?size=${size}`,
   getTrackArtworkUrl: (trackId: string, size: 96 | 256 | 512 = 256) =>

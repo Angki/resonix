@@ -105,16 +105,16 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
 
         // 1. Recursive file collection
         const fileList: string[] = [];
-        function walk(dir: string) {
+        async function walk(dir: string): Promise<void> {
           if (cancelRequested) return;
           try {
             activeScan.currentFolder = dir;
-            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
             for (const entry of entries) {
               if (cancelRequested) return;
               const full = path.join(dir, entry.name);
               if (entry.isDirectory()) {
-                walk(full);
+                await walk(full);
               } else if (entry.isFile() && isSupportedAudio(entry.name)) {
                 fileList.push(full);
               }
@@ -125,7 +125,7 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
           }
         }
 
-        walk(root.path);
+        await walk(root.path);
         activeScan.totalFilesFound += fileList.length;
 
         // 2. Fetch existing tracks for this root
@@ -158,7 +158,7 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
                 seenPaths.add(lowerNorm);
 
                 try {
-                  const stat = fs.statSync(filePath);
+                  const stat = await fs.promises.stat(filePath);
                   const mtimeMs = BigInt(Math.floor(stat.mtimeMs));
                   const fileSize = BigInt(stat.size);
                   const existing = existingMap.get(lowerNorm);
@@ -234,7 +234,7 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
                   );
                 } else if (folderArt) {
                   try {
-                    const artBuf = fs.readFileSync(folderArt);
+                    const artBuf = await fs.promises.readFile(folderArt);
                     artworkId = await getOrCreateArtworkRecord(
                       artBuf,
                       'folder',
@@ -359,6 +359,9 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
                     bitDepth: meta.bitDepth,
                     channels: meta.channels,
                     isLossless: meta.isLossless,
+                    replayGainTrackGain: meta.replayGainTrackGain ?? null,
+                    replayGainAlbumGain: meta.replayGainAlbumGain ?? null,
+                    replayGainTrackPeak: meta.replayGainTrackPeak ?? null,
                     isUnavailable: false,
                     artistId,
                     artistName: meta.artistName,
@@ -392,6 +395,9 @@ export async function runLibraryScan(specificRootId?: string): Promise<ScanStatu
                     bitDepth: meta.bitDepth,
                     channels: meta.channels,
                     isLossless: meta.isLossless,
+                    replayGainTrackGain: meta.replayGainTrackGain ?? null,
+                    replayGainAlbumGain: meta.replayGainAlbumGain ?? null,
+                    replayGainTrackPeak: meta.replayGainTrackPeak ?? null,
                     isUnavailable: false,
                     artistId,
                     artistName: meta.artistName,

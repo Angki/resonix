@@ -55,16 +55,17 @@ export async function playlistsRoutes(app: FastifyInstance) {
   app.get('/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const userId = req.user?.id;
+    if (!userId) return reply.status(401).send({ error: 'Auth required' });
 
-    const playlist = await prisma.playlist.findUnique({
-      where: { id },
+    const playlist = await prisma.playlist.findFirst({
+      where: { id, userId },
       include: {
         tracks: {
           orderBy: { sortOrder: 'asc' },
           include: {
             track: {
               include: {
-                userStats: userId ? { where: { userId } } : false,
+                userStats: { where: { userId } },
               },
             },
           },
@@ -88,6 +89,10 @@ export async function playlistsRoutes(app: FastifyInstance) {
         genre: t.genre,
         codec: t.codec,
         bitrate: t.bitrate,
+        isLossless: t.isLossless,
+        replayGainTrackGain: t.replayGainTrackGain,
+        replayGainAlbumGain: t.replayGainAlbumGain,
+        replayGainTrackPeak: t.replayGainTrackPeak,
         isFavorite: userStat?.isFavorite ?? false,
         rating: userStat?.rating ?? null,
         localPlayCount: userStat?.playCount || 0,
@@ -106,11 +111,20 @@ export async function playlistsRoutes(app: FastifyInstance) {
 
   app.post('/:id/tracks', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const userId = req.user?.id;
+    if (!userId) return reply.status(401).send({ error: 'Auth required' });
+
     const { trackIds } = req.body as { trackIds: string[] };
 
     if (!Array.isArray(trackIds) || trackIds.length === 0) {
       return reply.status(400).send({ error: 'trackIds array required' });
     }
+
+    const playlist = await prisma.playlist.findFirst({
+      where: { id, userId },
+      select: { id: true },
+    });
+    if (!playlist) return reply.status(404).send({ error: 'Playlist not found' });
 
     const highest = await prisma.playlistTrack.findFirst({
       where: { playlistId: id },
@@ -120,21 +134,27 @@ export async function playlistsRoutes(app: FastifyInstance) {
 
     let currentOrder = (highest?.sortOrder ?? -1) + 1;
 
-    for (const trackId of trackIds) {
-      await prisma.playlistTrack.create({
-        data: {
-          playlistId: id,
-          trackId,
-          sortOrder: currentOrder++,
-        },
-      });
-    }
+    await prisma.playlistTrack.createMany({
+      data: trackIds.map((trackId) => ({
+        playlistId: id,
+        trackId,
+        sortOrder: currentOrder++,
+      })),
+    });
 
     return { success: true, addedCount: trackIds.length };
   });
 
   app.delete('/:id/tracks/:trackId', async (req, reply) => {
     const { id, trackId } = req.params as { id: string; trackId: string };
+    const userId = req.user?.id;
+    if (!userId) return reply.status(401).send({ error: 'Auth required' });
+
+    const playlist = await prisma.playlist.findFirst({
+      where: { id, userId },
+      select: { id: true },
+    });
+    if (!playlist) return reply.status(404).send({ error: 'Playlist not found' });
 
     await prisma.playlistTrack.deleteMany({
       where: { playlistId: id, trackId },
@@ -145,9 +165,11 @@ export async function playlistsRoutes(app: FastifyInstance) {
 
   app.get('/:id/export.m3u8', async (req, reply) => {
     const { id } = req.params as { id: string };
+    const userId = req.user?.id;
+    if (!userId) return reply.status(401).send({ error: 'Auth required' });
 
-    const playlist = await prisma.playlist.findUnique({
-      where: { id },
+    const playlist = await prisma.playlist.findFirst({
+      where: { id, userId },
       include: {
         tracks: {
           orderBy: { sortOrder: 'asc' },

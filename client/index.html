@@ -42,13 +42,23 @@
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Self-heal on chunk loading failures caused by stale ServiceWorker caches
+      // Self-heal on chunk loading failures caused by stale app-shell caches.
+      // Never delete offline audio caches and never enter a reload loop.
       window.addEventListener('error', function(e) {
         if (e.target && (e.target.tagName === 'SCRIPT' || e.target.tagName === 'LINK')) {
-          console.warn('[Resonix] Asset failed to load. Auto-clearing cache...');
+          var recoveryKey = 'resonix-last-asset-recovery';
+          var lastRecovery = Number(sessionStorage.getItem(recoveryKey) || 0);
+          if (Date.now() - lastRecovery < 15000) {
+            console.warn('[Resonix] Asset failed to load again; skipping cache reset to avoid a reload loop.');
+            return;
+          }
+          sessionStorage.setItem(recoveryKey, String(Date.now()));
+          console.warn('[Resonix] Asset failed to load. Clearing app-shell caches only...');
           if ('caches' in window) {
             caches.keys().then(function(keys) {
-              return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+              return Promise.all(keys.map(function(k) {
+                return k.indexOf('audio-cache-') === 0 ? Promise.resolve(false) : caches.delete(k);
+              }));
             }).then(function() {
               window.location.reload();
             });

@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
+import { isPlaceholderSecret, parseTrustProxy } from './security/network.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,6 +32,7 @@ const envSchema = z.object({
   LIBRARY_ROOTS_JSON: z.string().default('[]'),
   DEPLOYMENT_PROFILE: z.enum(['PERSONAL', 'LAN', 'PUBLIC']).default('PERSONAL'),
   ALLOWED_ORIGINS: z.string().optional().default(''),
+  TRUST_PROXY: z.string().default('false'),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);
@@ -38,6 +40,15 @@ const parsedEnv = envSchema.safeParse(process.env);
 if (!parsedEnv.success) {
   console.error('❌ Invalid environment variables:', parsedEnv.error.format());
   process.exit(1);
+}
+
+if (process.env.NODE_ENV === 'production') {
+  for (const key of ['SESSION_SECRET', 'CREDENTIAL_ENCRYPTION_KEY'] as const) {
+    if (isPlaceholderSecret(parsedEnv.data[key])) {
+      console.error(`❌ ${key} still contains a placeholder value. Generate a unique secret before production deployment.`);
+      process.exit(1);
+    }
+  }
 }
 
 // Support PLAYLIST_IMPORT_PATH or fallback to MUSICBEE_DISCOVERY_PATH
@@ -79,6 +90,7 @@ export const config = {
   MUSICBEE_DISCOVERY_PATH: effectivePlaylistPath,
   libraryRoots: libraryRoots.map(r => path.normalize(r.trim())),
   allowedOrigins: Array.from(new Set([...defaultOrigins, ...customOrigins])),
+  trustProxy: parseTrustProxy(parsedEnv.data.TRUST_PROXY),
   cacheDir: path.join(rootDir, 'cache'),
   artworkCacheDir: path.join(rootDir, 'cache', 'artwork'),
   dataDir: path.join(rootDir, 'data'),

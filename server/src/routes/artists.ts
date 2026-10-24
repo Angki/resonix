@@ -64,7 +64,11 @@ export async function artistsRoutes(app: FastifyInstance) {
 
     const artists = await prisma.artist.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        name: true,
+        photoPath: true,
+        logoPath: true,
         _count: {
           select: {
             tracks: { where: { isUnavailable: false, ...(rootId ? { rootId } : {}) } },
@@ -112,7 +116,6 @@ export async function artistsRoutes(app: FastifyInstance) {
       totalPlays: playMap.get(a.id) || 0,
       hasPhoto: Boolean(a.photoPath && diskFiles.has(path.basename(a.photoPath))),
       hasLogo: Boolean(a.logoPath && diskFiles.has(path.basename(a.logoPath))),
-      bio: a.bio,
     }));
 
     // In-memory sort if sorting by aggregate counts

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../db.js';
 import { hashPassword, verifyPassword, signSession, encryptSecret } from '../crypto.js';
 import { verifyBootstrapToken, consumeBootstrapToken } from '../bootstrap.js';
+import { canPerformInitialSetup } from '../security/network.js';
+import { config } from '../config.js';
 
 export async function authRoutes(app: FastifyInstance) {
   app.get('/status', async (req) => {
@@ -28,12 +30,13 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.status(403).send({ error: 'Setup already completed and is permanently disabled' });
     }
 
-    // Require loopback or valid bootstrap token
-    const rawIp = req.ip || req.raw.socket?.remoteAddress || '';
-    const isLoopback = rawIp === '127.0.0.1' || rawIp === '::1' || rawIp === '::ffff:127.0.0.1' || rawIp === 'localhost';
+    // Initial setup is only reachable from the server machine or with a valid
+    // bootstrap token. Always use the raw socket address, never proxy headers.
+    const remoteAddress = req.raw.socket?.remoteAddress;
     const candidateToken = (req.headers['x-bootstrap-token'] as string) || (req.query as any)?.token;
+    const tokenValid = verifyBootstrapToken(candidateToken);
 
-    if (!isLoopback && !verifyBootstrapToken(candidateToken)) {
+    if (!canPerformInitialSetup({ remoteAddress, tokenValid, profile: config.DEPLOYMENT_PROFILE })) {
       return reply.status(403).send({
         error: 'Initial setup must be performed from the local server machine or with a valid X-Bootstrap-Token',
       });

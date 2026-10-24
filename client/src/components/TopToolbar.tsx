@@ -42,6 +42,7 @@ export const TopToolbar: React.FC = () => {
     selectedArtistName,
     selectedAlbumTitle,
     selectedGenre,
+    selectedPlaylistId,
     selectedPlaylistName,
     selectCollection,
     selectArtist,
@@ -90,6 +91,33 @@ export const TopToolbar: React.FC = () => {
   });
 
   const hasFilter = selectedRootName || selectedArtistName || selectedAlbumTitle || selectedGenre || selectedPlaylistName;
+
+  // Keep the input instantly responsive while only triggering library queries
+  // after the user pauses typing.
+  const [searchInput, setSearchInput] = React.useState(searchQuery);
+  const searchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    setSearchInput(searchQuery);
+  }, [searchQuery]);
+
+  React.useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, []);
+
+  const handleSearchInput = (value: string) => {
+    setSearchInput(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setSearchQuery(value), 250);
+  };
+
+  const clearSearch = () => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    setSearchInput('');
+    setSearchQuery('');
+  };
 
   return (
     <header className="h-11 bg-charcoal-900/95 backdrop-blur-md border-b border-charcoal-750 px-2 sm:px-3 flex items-center justify-between select-none shrink-0 text-xs gap-1 sm:gap-2 z-20">
@@ -156,6 +184,16 @@ export const TopToolbar: React.FC = () => {
             {selectedPlaylistName && (
               <span className="inline-flex items-center bg-charcoal-800/90 text-zinc-300 px-2 py-0.5 rounded-full text-[10.5px] border border-charcoal-700 shadow-xs">
                 <span className="text-zinc-500 mr-1 font-mono">Playlist:</span> {selectedPlaylistName}
+                {selectedPlaylistId && (
+                  <a
+                    href={`/api/playlists/${selectedPlaylistId}/export.m3u8`}
+                    download
+                    title="Export playlist as M3U8"
+                    className="ml-1 text-zinc-400 hover:text-cyan-300 p-0.5"
+                  >
+                    <Download size={10} />
+                  </a>
+                )}
                 <button onClick={() => selectPlaylist(null)} className="ml-1 text-zinc-400 hover:text-red-400 p-0.5">
                   <X size={10} />
                 </button>
@@ -190,8 +228,8 @@ export const TopToolbar: React.FC = () => {
             <Search size={13} className="ml-2.5 text-zinc-400 shrink-0 pointer-events-none" />
             <input
               type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={searchInput}
+              onChange={(e) => handleSearchInput(e.target.value)}
               placeholder={
                 searchField === 'title'
                   ? 'Search song title... (Ctrl+F)'
@@ -203,9 +241,9 @@ export const TopToolbar: React.FC = () => {
               }
               className="w-full bg-transparent text-zinc-100 placeholder-zinc-500 px-2 py-1.5 text-xs focus:outline-none"
             />
-            {searchQuery ? (
+            {searchInput ? (
               <button
-                onClick={() => setSearchQuery('')}
+                onClick={clearSearch}
                 className="mr-2 text-zinc-400 hover:text-zinc-200 transition shrink-0 p-0.5 rounded hover:bg-charcoal-700"
                 title="Clear search"
               >

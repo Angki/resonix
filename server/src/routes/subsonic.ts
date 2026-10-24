@@ -8,6 +8,14 @@ import { getArtworkThumbnail } from '../library/artwork.js';
 import { config } from '../config.js';
 import { startPlaybackSession, reportPlaybackProgress } from '../playback/tracker.js';
 import { lyricsService } from '../lyrics/lyricsService.js';
+import { getScanStatus, runLibraryScan } from '../library/scanner.js';
+import {
+  buildStructuredLyrics,
+  normalizePlayQueue,
+  buildPlayQueuePayload,
+  buildFolderChild,
+  normalizeBookmarks,
+} from './subsonicHelpers.js';
 
 const SUBSONIC_API_VERSION = '1.16.1';
 const SERVER_VERSION = '1.0.0';
@@ -306,6 +314,40 @@ function formatSubsonicAlbum(album: any) {
   };
 }
 
+function getBaseUrl(req: FastifyRequest): string {
+  const host = req.headers.host || `localhost:${config.PORT}`;
+  return `${req.protocol}://${host}`;
+}
+
+function coverArtUrl(req: FastifyRequest, id: string, size: number): string {
+  return `${getBaseUrl(req)}/rest/getCoverArt?id=${encodeURIComponent(id)}&size=${size}`;
+}
+
+function shuffleList<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function parseCachedSimilarArtistIds(similarArtists: string | null): string[] {
+  if (!similarArtists) return [];
+  try {
+    const parsed = JSON.parse(similarArtists);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item: any) => item?.inLibrary && typeof item.libraryArtistId === 'string')
+      .map((item: any) => item.libraryArtistId as string);
+  } catch {
+    return [];
+  }
+}
+
+const playQueueKey = (userId: string) => `subsonic_playqueue_${userId}`;
+const bookmarksKey = (userId: string) => `subsonic_bookmarks_${userId}`;
+
 export async function subsonicRoutes(app: FastifyInstance) {
   // Main handler for all Subsonic endpoints (/rest/{method} or /rest/{method}.view)
   app.all('/:method', async (req: FastifyRequest, reply: FastifyReply) => {
@@ -352,6 +394,7 @@ export async function subsonicRoutes(app: FastifyInstance) {
             { name: 'formPost', versions: [1] },
             { name: 'transcoding', versions: [1] },
             { name: 'search3', versions: [1] },
+            { name: 'songLyrics', versions: [1] },
           ],
         });
       }
@@ -497,6 +540,115 @@ export async function subsonicRoutes(app: FastifyInstance) {
         });
       }
 
+      // 7b. Artist Info (biography + similar artists + images)
+      case 'getartistinfo':
+      case 'getartistinfo2': {
+        const artistId = params.id;
+        if (!artistId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const artist = await prisma.artist.findUnique({ where: { id: artistId } });
+        if (!artist) {
+          return sendSubsonicError(reply, format, 70, 'Artist not found');
+        }
+
+        const similarIds = parseCachedSimilarArtistIds(artist.similarArtists);
+        const similar =
+          similarIds.length > 0
+            ? await prisma.artist.findMany({
+                where: { id: { in: similarIds } },
+                select: { id: true, name: true, _count: { select: { albums: true } } },
+              })
+            : [];
+
+        const photoUrl = `${getBaseUrl(req)}/api/artists/${encodeURIComponent(artist.id)}/photo`;
+        const info = {
+          biography: artist.bio || undefined,
+          similarArtist: similar.map((item) => ({
+            id: item.id,
+            name: item.name,
+            albumCount: item._count.albums,
+            coverArt: item.id,
+          })),
+          smallImageUrl: photoUrl,
+          mediumImageUrl: photoUrl,
+          largeImageUrl: photoUrl,
+        };
+
+        const responseKey = method === 'getartistinfo2' ? 'artistInfo2' : 'artistInfo';
+        return sendSubsonicResponse(reply, format, { [responseKey]: info });
+      }
+
+      // 7c. Browse a directory (artist -> albums, album -> songs)
+      case 'getmusicdirectory': {
+        const directoryId = params.id;
+        if (!directoryId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const artist = await prisma.artist.findUnique({
+          where: { id: directoryId },
+          include: {
+            albums: {
+              include: { _count: { select: { tracks: true } } },
+              orderBy: [{ year: 'asc' }, { title: 'asc' }],
+            },
+          },
+        });
+
+        if (artist) {
+          return sendSubsonicResponse(reply, format, {
+            directory: {
+              id: artist.id,
+              name: artist.name,
+              child: artist.albums.map((album) =>
+                buildFolderChild({
+                  kind: 'album',
+                  id: album.id,
+                  parent: artist.id,
+                  title: album.title,
+                  artist: artist.name,
+                  year: album.year,
+                  coverArt: album.artworkId || album.id,
+                  songCount: album._count.tracks,
+                  created: album.createdAt ? album.createdAt.toISOString() : null,
+                })
+              ),
+            },
+          });
+        }
+
+        const album = await prisma.album.findUnique({
+          where: { id: directoryId },
+          include: {
+            artist: true,
+            tracks: {
+              include: {
+                album: true,
+                userStats: { where: { userId: user.id } },
+              },
+              orderBy: [{ discNumber: 'asc' }, { trackNumber: 'asc' }],
+            },
+          },
+        });
+
+        if (album) {
+          return sendSubsonicResponse(reply, format, {
+            directory: {
+              id: album.id,
+              parent: album.artistId || undefined,
+              name: album.title,
+              child: album.tracks.map((track) =>
+                buildFolderChild({ kind: 'song', song: formatSubsonicSong(track) }, album.id)
+              ),
+            },
+          });
+        }
+
+        return sendSubsonicError(reply, format, 70, 'Directory not found');
+      }
+
       // 8. Album Detail
       case 'getalbum': {
         const albumId = params.id;
@@ -509,6 +661,7 @@ export async function subsonicRoutes(app: FastifyInstance) {
           include: {
             artist: true,
             tracks: {
+              where: { isUnavailable: false },
               include: {
                 userStats: { where: { userId: user.id } },
               },
@@ -541,6 +694,122 @@ export async function subsonicRoutes(app: FastifyInstance) {
         });
       }
 
+      // 8b. Album Info (images; the model has no free-form notes yet)
+      case 'getalbuminfo':
+      case 'getalbuminfo2': {
+        const albumId = params.id;
+        if (!albumId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const album = await prisma.album.findUnique({
+          where: { id: albumId },
+          select: { id: true, artworkId: true },
+        });
+        if (!album) {
+          return sendSubsonicError(reply, format, 70, 'Album not found');
+        }
+
+        const artId = album.artworkId || album.id;
+        const info = {
+          smallImageUrl: coverArtUrl(req, artId, 300),
+          mediumImageUrl: coverArtUrl(req, artId, 600),
+          largeImageUrl: coverArtUrl(req, artId, 1000),
+        };
+
+        const responseKey = method === 'getalbuminfo2' ? 'albumInfo2' : 'albumInfo';
+        return sendSubsonicResponse(reply, format, { [responseKey]: info });
+      }
+
+      // 8c. Similar Songs (uses cached Last.fm similar artists, then genre fallback)
+      case 'getsimilarsongs':
+      case 'getsimilarsongs2': {
+        const seedId = params.id;
+        if (!seedId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+        const count = Math.min(100, Math.max(1, parseInt(params.count || '50', 10) || 50));
+
+        let seedTrack: any = null;
+        let seedArtist: any = null;
+
+        if (method === 'getsimilarsongs2') {
+          seedArtist = await prisma.artist.findUnique({ where: { id: seedId } });
+        } else {
+          seedTrack = await prisma.track.findUnique({ where: { id: seedId } });
+          if (seedTrack?.artistId) {
+            seedArtist = await prisma.artist.findUnique({ where: { id: seedTrack.artistId } });
+          }
+        }
+
+        if (!seedArtist && !seedTrack) {
+          return sendSubsonicError(reply, format, 70, 'Artist or song not found');
+        }
+
+        const artistIds = new Set<string>();
+        if (seedArtist) {
+          artistIds.add(seedArtist.id);
+          for (const id of parseCachedSimilarArtistIds(seedArtist.similarArtists)) {
+            artistIds.add(id);
+          }
+        }
+
+        const seedGenre = seedTrack?.genre?.trim() || undefined;
+        const filters: any[] = [];
+        if (artistIds.size > 0) filters.push({ artistId: { in: [...artistIds] } });
+        if (seedGenre) filters.push({ genre: { equals: seedGenre } });
+
+        const candidates = await prisma.track.findMany({
+          where: {
+            isUnavailable: false,
+            ...(seedTrack ? { id: { not: seedTrack.id } } : {}),
+            ...(filters.length > 0 ? { OR: filters } : {}),
+          },
+          include: {
+            album: true,
+            userStats: { where: { userId: user.id } },
+          },
+          take: Math.max(count * 4, 50),
+        });
+
+        const songs = shuffleList(candidates).slice(0, count).map(formatSubsonicSong);
+        return sendSubsonicResponse(reply, format, {
+          similarSongs2: { song: songs },
+        });
+      }
+
+      // 8d. Songs by Genre
+      case 'getsongsbygenre': {
+        const genre = typeof params.genre === 'string' ? params.genre.trim() : '';
+        if (!genre) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: genre');
+        }
+
+        const count = Math.min(500, Math.max(1, parseInt(params.count || '50', 10) || 50));
+        const offset = Math.max(0, parseInt(params.offset || '0', 10) || 0);
+
+        const [tracks, total] = await Promise.all([
+          prisma.track.findMany({
+            where: { isUnavailable: false, genre: { contains: genre } },
+            include: {
+              album: true,
+              userStats: { where: { userId: user.id } },
+            },
+            orderBy: [{ artistName: 'asc' }, { albumTitle: 'asc' }, { discNumber: 'asc' }, { trackNumber: 'asc' }],
+            take: count,
+            skip: offset,
+          }),
+          prisma.track.count({ where: { isUnavailable: false, genre: { contains: genre } } }),
+        ]);
+
+        return sendSubsonicResponse(reply, format, {
+          songsByGenre: {
+            song: tracks.map(formatSubsonicSong),
+            total,
+          },
+        });
+      }
+
       // 9. Song Detail
       case 'getsong': {
         const songId = params.id;
@@ -568,27 +837,21 @@ export async function subsonicRoutes(app: FastifyInstance) {
 
       // 10. Genres List
       case 'getgenres': {
-        const tracks = await prisma.track.findMany({
-          where: { genre: { not: null } },
-          select: { genre: true, albumId: true },
-        });
+        const rows = await prisma.$queryRawUnsafe<any[]>(
+          `
+          SELECT trim(genre) AS name, COUNT(*) AS songCount, COUNT(DISTINCT albumId) AS albumCount
+          FROM Track
+          WHERE genre IS NOT NULL AND trim(genre) <> '' AND isUnavailable = 0
+          GROUP BY trim(genre)
+          ORDER BY songCount DESC
+          `
+        );
 
-        const genreMap: Record<string, { songCount: number; albumSet: Set<string> }> = {};
-        for (const t of tracks) {
-          const g = t.genre?.trim();
-          if (!g) continue;
-          if (!genreMap[g]) genreMap[g] = { songCount: 0, albumSet: new Set() };
-          genreMap[g].songCount++;
-          if (t.albumId) genreMap[g].albumSet.add(t.albumId);
-        }
-
-        const genres = Object.entries(genreMap)
-          .map(([name, data]) => ({
-            value: name,
-            songCount: data.songCount,
-            albumCount: data.albumSet.size,
-          }))
-          .sort((a, b) => b.songCount - a.songCount);
+        const genres = rows.map((row) => ({
+          value: String(row.name),
+          songCount: Number(row.songCount || 0),
+          albumCount: Number(row.albumCount || 0),
+        }));
 
         return sendSubsonicResponse(reply, format, {
           genres: {
@@ -605,18 +868,43 @@ export async function subsonicRoutes(app: FastifyInstance) {
         const offset = Math.max(0, parseInt(params.offset || '0', 10));
 
         let orderBy: any = { createdAt: 'desc' };
-        if (type === 'alphabeticalbyname') {
+        if (type === 'alphabeticalbyname' || type === 'bygenre' || type === 'starred') {
           orderBy = { title: 'asc' };
         } else if (type === 'alphabeticalbyartist') {
           orderBy = { artist: { name: 'asc' } };
         } else if (type === 'byyear') {
           orderBy = { year: 'desc' };
+        } else if (type === 'recent') {
+          orderBy = { updatedAt: 'desc' };
+        }
+
+        const where: any = {};
+        if (type === 'bygenre') {
+          if (!params.genre) {
+            return sendSubsonicError(reply, format, 10, 'Required parameter missing: genre');
+          }
+          where.tracks = { some: { genre: { contains: String(params.genre) }, isUnavailable: false } };
+        } else if (type === 'starred') {
+          where.tracks = {
+            some: {
+              isUnavailable: false,
+              userStats: { some: { userId: user.id, isFavorite: true } },
+            },
+          };
+        }
+
+        let skip = offset;
+        if (type === 'random') {
+          const total = await prisma.album.count({ where });
+          skip = Math.max(0, Math.floor(Math.random() * Math.max(1, total - size)));
+          orderBy = { title: 'asc' };
         }
 
         const albums = await prisma.album.findMany({
+          where,
           orderBy,
           take: size,
-          skip: offset,
+          skip,
           include: {
             artist: true,
             _count: { select: { tracks: true } },
@@ -638,10 +926,23 @@ export async function subsonicRoutes(app: FastifyInstance) {
       case 'getrandomsongs': {
         const size = Math.min(100, Math.max(1, parseInt(params.size || '20', 10)));
 
-        const totalTracks = await prisma.track.count();
+        const where: any = { isUnavailable: false };
+        if (params.genre) where.genre = { contains: String(params.genre) };
+
+        const fromYear = parseInt(params.fromYear, 10);
+        const toYear = parseInt(params.toYear, 10);
+        if (Number.isFinite(fromYear) || Number.isFinite(toYear)) {
+          where.year = {
+            ...(Number.isFinite(fromYear) ? { gte: fromYear } : {}),
+            ...(Number.isFinite(toYear) ? { lte: toYear } : {}),
+          };
+        }
+
+        const totalTracks = await prisma.track.count({ where });
         const randomSkip = Math.max(0, Math.floor(Math.random() * Math.max(1, totalTracks - size)));
 
         const tracks = await prisma.track.findMany({
+          where,
           skip: randomSkip,
           take: size,
           include: {
@@ -680,7 +981,7 @@ export async function subsonicRoutes(app: FastifyInstance) {
             include: { _count: { select: { albums: true } } },
           }),
           prisma.album.findMany({
-            where: { title: { contains: query } },
+            where: { title: { contains: query }, tracks: { some: { isUnavailable: false } } },
             take: albumCount,
             include: {
               artist: true,
@@ -690,6 +991,7 @@ export async function subsonicRoutes(app: FastifyInstance) {
           }),
           prisma.track.findMany({
             where: {
+              isUnavailable: false,
               OR: [
                 { title: { contains: query } },
                 { artistName: { contains: query } },
@@ -736,9 +1038,13 @@ export async function subsonicRoutes(app: FastifyInstance) {
 
         if (params.format && params.format !== 'raw') {
           (req.query as any).transcode = 'true';
+          (req.query as any).format = params.format;
         }
         if (params.maxBitRate) {
-          (req.query as any).bitrate = params.maxBitRate;
+          (req.query as any).maxBitRate = params.maxBitRate;
+        }
+        if (params.timeOffset) {
+          (req.query as any).timeOffset = params.timeOffset;
         }
 
         return handleStreamRequest(req as any, reply);
@@ -830,6 +1136,31 @@ export async function subsonicRoutes(app: FastifyInstance) {
         }
 
         return sendSubsonicResponse(reply, format);
+      }
+
+      // 16b. Now Playing (recent open playback sessions)
+      case 'getnowplaying': {
+        const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+        const sessions = await prisma.playbackSession.findMany({
+          where: { endedAt: null, startedAt: { gte: cutoff } },
+          include: {
+            track: { include: { album: true } },
+            user: { select: { username: true } },
+          },
+          orderBy: { startedAt: 'desc' },
+          take: 50,
+        });
+
+        const entries = sessions.map((session) => ({
+          ...formatSubsonicSong(session.track),
+          username: session.user.username,
+          minutesAgo: Math.max(0, Math.floor((Date.now() - session.startedAt.getTime()) / 60000)),
+          playerId: 0,
+        }));
+
+        return sendSubsonicResponse(reply, format, {
+          nowPlaying: { entry: entries },
+        });
       }
 
       // 17. Playlists
@@ -1008,6 +1339,150 @@ export async function subsonicRoutes(app: FastifyInstance) {
         return sendSubsonicResponse(reply, format);
       }
 
+      // 18b. Cross-device Play Queue
+      case 'getplayqueue': {
+        const setting = await prisma.setting.findUnique({ where: { key: playQueueKey(user.id) } });
+        const queue = normalizePlayQueue(setting?.value);
+        if (queue.ids.length === 0) {
+          return sendSubsonicResponse(reply, format, { playQueue: {} });
+        }
+
+        const tracks = await prisma.track.findMany({
+          where: { id: { in: queue.ids } },
+          include: {
+            album: true,
+            userStats: { where: { userId: user.id } },
+          },
+        });
+
+        return sendSubsonicResponse(
+          reply,
+          format,
+          buildPlayQueuePayload(queue, tracks.map(formatSubsonicSong))
+        );
+      }
+
+      case 'saveplayqueue': {
+        const rawIds = params.id;
+        const ids = (Array.isArray(rawIds) ? rawIds : rawIds ? [rawIds] : []).filter(
+          (id): id is string => typeof id === 'string' && id.length > 0
+        );
+        if (ids.length === 0) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const requestedCurrent = typeof params.current === 'string' ? params.current : null;
+        const currentId = requestedCurrent && ids.includes(requestedCurrent) ? requestedCurrent : ids[0];
+        const position = Math.max(0, parseInt(params.position, 10) || 0);
+        const key = playQueueKey(user.id);
+        const value = JSON.stringify({
+          ids,
+          currentId,
+          position,
+          changedBy: typeof params.c === 'string' && params.c ? params.c : user.username,
+        });
+
+        await prisma.setting.upsert({
+          where: { key },
+          update: { value },
+          create: { key, value },
+        });
+
+        return sendSubsonicResponse(reply, format);
+      }
+
+      // 18c. Bookmarks (resume positions for audiobooks/podcasts)
+      case 'getbookmarks': {
+        const setting = await prisma.setting.findUnique({ where: { key: bookmarksKey(user.id) } });
+        const bookmarks = normalizeBookmarks(setting?.value);
+        if (bookmarks.length === 0) {
+          return sendSubsonicResponse(reply, format, { bookmarks: {} });
+        }
+
+        const tracks = await prisma.track.findMany({
+          where: { id: { in: bookmarks.map((b) => b.trackId) } },
+          include: {
+            album: true,
+            userStats: { where: { userId: user.id } },
+          },
+        });
+        const trackMap = new Map(tracks.map((track) => [track.id, track]));
+
+        const entries = bookmarks
+          .filter((bookmark) => trackMap.has(bookmark.trackId))
+          .map((bookmark) => ({
+            entry: formatSubsonicSong(trackMap.get(bookmark.trackId)),
+            position: bookmark.position,
+            username: user.username,
+            comment: bookmark.comment || undefined,
+            created: bookmark.created || undefined,
+          }));
+
+        return sendSubsonicResponse(reply, format, {
+          bookmarks: { bookmark: entries },
+        });
+      }
+
+      case 'createbookmark': {
+        const trackId = params.id;
+        const position = parseInt(params.position, 10);
+        if (!trackId || !Number.isFinite(position) || position < 0) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id or position');
+        }
+
+        const key = bookmarksKey(user.id);
+        const setting = await prisma.setting.findUnique({ where: { key } });
+        const map: Record<string, any> = {};
+        for (const bookmark of normalizeBookmarks(setting?.value)) {
+          map[bookmark.trackId] = {
+            position: bookmark.position,
+            comment: bookmark.comment,
+            created: bookmark.created,
+          };
+        }
+        map[trackId] = {
+          position,
+          comment: typeof params.comment === 'string' && params.comment ? params.comment : null,
+          created: new Date().toISOString(),
+        };
+
+        const value = JSON.stringify(map);
+        await prisma.setting.upsert({
+          where: { key },
+          update: { value },
+          create: { key, value },
+        });
+
+        return sendSubsonicResponse(reply, format);
+      }
+
+      case 'deletebookmark': {
+        const trackId = params.id;
+        if (!trackId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const key = bookmarksKey(user.id);
+        const setting = await prisma.setting.findUnique({ where: { key } });
+        const remaining = normalizeBookmarks(setting?.value).filter((bookmark) => bookmark.trackId !== trackId);
+
+        if (remaining.length === 0) {
+          await prisma.setting.deleteMany({ where: { key } });
+        } else {
+          const map: Record<string, any> = {};
+          for (const bookmark of remaining) {
+            map[bookmark.trackId] = {
+              position: bookmark.position,
+              comment: bookmark.comment,
+              created: bookmark.created,
+            };
+          }
+          await prisma.setting.update({ where: { key }, data: { value: JSON.stringify(map) } });
+        }
+
+        return sendSubsonicResponse(reply, format);
+      }
+
       // 19. Lyrics
       case 'getlyrics': {
         const trackId = params.id;
@@ -1042,6 +1517,33 @@ export async function subsonicRoutes(app: FastifyInstance) {
         });
       }
 
+      // 19b. OpenSubsonic Structured Lyrics
+      case 'getlyricsbysongid': {
+        const trackId = params.id;
+        if (!trackId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        const track = await prisma.track.findUnique({
+          where: { id: trackId },
+          select: { id: true, title: true, artistName: true },
+        });
+        if (!track) {
+          return sendSubsonicError(reply, format, 70, 'Song not found');
+        }
+
+        const lyrics = await lyricsService.getLyrics(track.id, false);
+        const lyricsList = buildStructuredLyrics({
+          artist: track.artistName,
+          title: track.title,
+          lines: lyrics.lines,
+          plainLyrics: lyrics.plainLyrics,
+          hasSyncedLyrics: lyrics.hasSyncedLyrics,
+        });
+
+        return sendSubsonicResponse(reply, format, { lyricsList });
+      }
+
       // 20. Top Songs
       case 'gettopsongs': {
         const artistName = params.artist;
@@ -1069,94 +1571,9 @@ export async function subsonicRoutes(app: FastifyInstance) {
         });
       }
 
-      // 21. Subsonic Playlists API
-      case 'getplaylists': {
-        const playlists = await prisma.playlist.findMany({
-          where: { isSmart: false },
-          include: {
-            tracks: {
-              include: { track: { select: { duration: true } } },
-            },
-            user: { select: { username: true } },
-          },
-          orderBy: { name: 'asc' },
-        });
-
-        const list = playlists.map((p) => {
-          const duration = p.tracks.reduce((sum, pt) => sum + (pt.track?.duration || 0), 0);
-          return {
-            id: p.id,
-            name: p.name,
-            comment: p.description || undefined,
-            owner: p.user?.username || user.username,
-            public: true,
-            songCount: p.tracks.length,
-            duration: Math.round(duration),
-            created: p.createdAt.toISOString(),
-            changed: p.updatedAt.toISOString(),
-            coverArt: p.tracks[0]?.trackId || undefined,
-          };
-        });
-
-        return sendSubsonicResponse(reply, format, {
-          playlists: {
-            playlist: list,
-          },
-        });
-      }
-
-      case 'getplaylist': {
-        const playlistId = params.id;
-        if (!playlistId) {
-          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
-        }
-
-        const playlist = await prisma.playlist.findUnique({
-          where: { id: playlistId },
-          include: {
-            tracks: {
-              orderBy: { sortOrder: 'asc' },
-              include: {
-                track: {
-                  include: {
-                    album: true,
-                    artist: true,
-                    userStats: { where: { userId: user.id } },
-                  },
-                },
-              },
-            },
-            user: { select: { username: true } },
-          },
-        });
-
-        if (!playlist) {
-          return sendSubsonicError(reply, format, 70, 'Playlist not found');
-        }
-
-        const songs = playlist.tracks.filter((pt) => pt.track).map((pt) => formatSubsonicSong(pt.track));
-        const duration = playlist.tracks.reduce((sum, pt) => sum + (pt.track?.duration || 0), 0);
-
-        return sendSubsonicResponse(reply, format, {
-          playlist: {
-            id: playlist.id,
-            name: playlist.name,
-            comment: playlist.description || undefined,
-            owner: playlist.user?.username || user.username,
-            public: true,
-            songCount: playlist.tracks.length,
-            duration: Math.round(duration),
-            created: playlist.createdAt.toISOString(),
-            changed: playlist.updatedAt.toISOString(),
-            coverArt: playlist.tracks[0]?.trackId || undefined,
-            entry: songs,
-          },
-        });
-      }
-
       case 'createplaylist': {
         const playlistId = params.playlistId;
-        const name = params.name || 'New Playlist';
+        const name = params.name;
         const rawSongIds = Array.isArray(params.songId)
           ? params.songId
           : params.songId
@@ -1165,9 +1582,17 @@ export async function subsonicRoutes(app: FastifyInstance) {
 
         let playlist: any;
         if (playlistId) {
+          const owned = await prisma.playlist.findFirst({
+            where: { id: playlistId, userId: user.id },
+            select: { id: true },
+          });
+          if (!owned) {
+            return sendSubsonicError(reply, format, 70, 'Playlist not found');
+          }
+
           playlist = await prisma.playlist.update({
             where: { id: playlistId },
-            data: { name },
+            data: name ? { name } : {},
           });
           if (rawSongIds.length > 0) {
             const existingCount = await prisma.playlistTrack.count({ where: { playlistId } });
@@ -1183,7 +1608,7 @@ export async function subsonicRoutes(app: FastifyInstance) {
           playlist = await prisma.playlist.create({
             data: {
               userId: user.id,
-              name,
+              name: name || 'New Playlist',
             },
           });
           if (rawSongIds.length > 0) {
@@ -1240,7 +1665,9 @@ export async function subsonicRoutes(app: FastifyInstance) {
           return sendSubsonicError(reply, format, 10, 'Required parameter missing: playlistId');
         }
 
-        const playlist = await prisma.playlist.findUnique({ where: { id: playlistId } });
+        const playlist = await prisma.playlist.findFirst({
+          where: { id: playlistId, userId: user.id },
+        });
         if (!playlist) {
           return sendSubsonicError(reply, format, 70, 'Playlist not found');
         }
@@ -1317,6 +1744,14 @@ export async function subsonicRoutes(app: FastifyInstance) {
           return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
         }
 
+        const owned = await prisma.playlist.findFirst({
+          where: { id: playlistId, userId: user.id },
+          select: { id: true },
+        });
+        if (!owned) {
+          return sendSubsonicError(reply, format, 70, 'Playlist not found');
+        }
+
         await prisma.playlistTrack.deleteMany({ where: { playlistId } });
         await prisma.playlist.delete({ where: { id: playlistId } });
 
@@ -1345,6 +1780,112 @@ export async function subsonicRoutes(app: FastifyInstance) {
           jukeboxStatus,
         });
       }
+
+      // 21. Original File Download
+      case 'download': {
+        const trackId = params.id;
+        if (!trackId) {
+          return sendSubsonicError(reply, format, 10, 'Required parameter missing: id');
+        }
+
+        (req as any).params = { trackId };
+        (req.query as any).download = 'true';
+        return handleStreamRequest(req as any, reply);
+      }
+
+      // 22. Scan Control
+      case 'getscanstatus': {
+        const status = getScanStatus();
+        const folderCount = await prisma.libraryRoot.count({ where: { isEnabled: true } });
+
+        return sendSubsonicResponse(reply, format, {
+          scanStatus: {
+            scanning: status.isRunning,
+            count: status.totalFilesFound,
+            folderCount,
+          },
+        });
+      }
+
+      case 'startscan': {
+        if (user.role !== 'admin') {
+          return sendSubsonicError(reply, format, 50, 'Not authorized to start a library scan');
+        }
+
+        const status = getScanStatus();
+        const folderCount = await prisma.libraryRoot.count({ where: { isEnabled: true } });
+
+        if (!status.isRunning) {
+          void runLibraryScan().catch((err) => {
+            app.log.error({ err }, 'Subsonic-triggered scan failed');
+          });
+        }
+
+        return sendSubsonicResponse(reply, format, {
+          scanStatus: {
+            scanning: true,
+            count: status.totalFilesFound,
+            folderCount,
+          },
+        });
+      }
+
+      // 23. User & Avatar
+      case 'getuser': {
+        const requestedName = typeof params.username === 'string' ? params.username : user.username;
+        const target =
+          requestedName === user.username
+            ? { username: user.username, role: user.role }
+            : await prisma.user.findUnique({
+                where: { username: requestedName },
+                select: { username: true, role: true },
+              });
+
+        if (!target) {
+          return sendSubsonicError(reply, format, 70, 'User not found');
+        }
+
+        const folderCount = await prisma.libraryRoot.count({ where: { isEnabled: true } });
+        return sendSubsonicResponse(reply, format, {
+          user: {
+            username: target.username,
+            scrobblingEnabled: true,
+            adminRole: target.role === 'admin',
+            settingsRole: target.role === 'admin',
+            downloadRole: true,
+            uploadRole: false,
+            playlistRole: true,
+            coverArtRole: true,
+            commentRole: false,
+            podcastRole: false,
+            shareRole: false,
+            videoConversionRole: false,
+            folder: Array.from({ length: folderCount }, (_, index) => index + 1),
+          },
+        });
+      }
+
+      case 'getavatar': {
+        reply.header('Content-Type', 'image/svg+xml');
+        reply.header('Cache-Control', 'public, max-age=86400');
+        return reply.send(FALLBACK_SVG);
+      }
+
+      // 24. Unsupported media types return empty lists so clients do not error out.
+      case 'getinternetradiostations':
+        return sendSubsonicResponse(reply, format, { internetRadioStations: {} });
+      case 'getpodcasts':
+        return sendSubsonicResponse(reply, format, { podcasts: {} });
+      case 'getnewestpodcasts':
+        return sendSubsonicResponse(reply, format, { newestPodcasts: {} });
+      case 'getshares':
+        return sendSubsonicResponse(reply, format, { shares: {} });
+      case 'getvideos':
+        return sendSubsonicResponse(reply, format, { videos: {} });
+      case 'getcaptions':
+        return sendSubsonicResponse(reply, format, { captions: {} });
+      case 'getchatmessages':
+        return sendSubsonicResponse(reply, format, { chatMessages: {} });
 
       default: {
         return sendSubsonicError(reply, format, 0, `Subsonic method '${method}' is not implemented on this server`);

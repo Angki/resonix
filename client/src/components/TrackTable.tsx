@@ -27,6 +27,10 @@ interface TrackTableProps {
   tracks: Track[];
   isLoading?: boolean;
   isFetching?: boolean;
+  hasMore?: boolean;
+  isFetchingMore?: boolean;
+  onLoadMore?: () => void;
+  totalCount?: number;
 }
 
 function formatDuration(sec: number): string {
@@ -60,7 +64,15 @@ function formatCodecBadge(codec?: string | null, bitrate?: number | null, isLoss
   return name;
 }
 
-export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading, isFetching }) => {
+export const TrackTable: React.FC<TrackTableProps> = ({
+  tracks,
+  isLoading,
+  isFetching,
+  hasMore,
+  isFetchingMore,
+  onLoadMore,
+  totalCount,
+}) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const { isMobile } = useResponsive();
   const { currentTrack, isPlaying, playTrack, addToQueue, playNext } = usePlayerStore();
@@ -118,11 +130,25 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading, isFet
 
   // Virtualizer for 60fps rendering of thousands of tracks
   const rowVirtualizer = useVirtualizer({
-    count: tracks.length,
+    count: tracks.length + (hasMore ? 1 : 0),
     getScrollElement: () => parentRef.current,
     estimateSize: () => (isMobile ? 44 : 32), // 44px on mobile (with subtitle), 32px compact on desktop
     overscan: 20,
   });
+
+  // Auto-fetch the next page when the user approaches the end of the loaded set.
+  // The ref prevents a failed request from looping endlessly.
+  const autoLoadCountRef = useRef(-1);
+  React.useEffect(() => {
+    if (!hasMore || isFetchingMore || !onLoadMore) return;
+    if (autoLoadCountRef.current === tracks.length) return;
+    const virtualItems = rowVirtualizer.getVirtualItems();
+    const last = virtualItems[virtualItems.length - 1];
+    if (last && last.index >= tracks.length - 15) {
+      autoLoadCountRef.current = tracks.length;
+      onLoadMore();
+    }
+  }, [hasMore, isFetchingMore, onLoadMore, tracks.length, rowVirtualizer]);
 
   const handleJumpToLetter = (char: string) => {
     setSelectedLetter(char);
@@ -330,6 +356,33 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading, isFet
           }}
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            if (virtualRow.index >= tracks.length) {
+              return (
+                <div
+                  key="track-table-load-more"
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: `${virtualRow.size}px`,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                  className="flex items-center justify-center bg-charcoal-900 text-[11px] text-zinc-500"
+                >
+                  <button
+                    onClick={onLoadMore}
+                    disabled={isFetchingMore}
+                    className="px-3 py-1 rounded border border-charcoal-700 bg-charcoal-850 hover:bg-charcoal-800 hover:text-zinc-200 disabled:opacity-60 transition"
+                  >
+                    {isFetchingMore
+                      ? 'Loading more tracks...'
+                      : `Load more${totalCount ? ` (${tracks.length} of ${totalCount})` : ''}`}
+                  </button>
+                </div>
+              );
+            }
+
             const track = tracks[virtualRow.index];
             const isCurrent = currentTrack?.id === track.id;
             const isSelected = selectedIds.has(track.id);
@@ -500,6 +553,14 @@ export const TrackTable: React.FC<TrackTableProps> = ({ tracks, isLoading, isFet
           onPlayNext={(ts) => playNext(ts)}
           onAddToQueue={(ts) => addToQueue(ts)}
           onToggleFavorite={handleToggleFavorite}
+          onSetRating={async (track, rating) => {
+            try {
+              await api.setRating(track.id, rating);
+              await queryClient.invalidateQueries({ queryKey: ['tracks'] });
+            } catch {
+              // ignore
+            }
+          }}
           onLocateAlbum={(t) => {
             if (t.albumId) {
               setSearchQuery('');

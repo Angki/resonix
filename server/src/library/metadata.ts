@@ -29,6 +29,47 @@ export interface ExtractedMetadata {
   };
 }
 
+function parseDbGain(value: any): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'object' && typeof value.dB === 'number') return value.dB;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value.replace(/[^\d.-]/g, ''));
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function parsePeakRatio(value: any): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'object' && typeof value.ratio === 'number') return value.ratio;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+export function parseReplayGain(common: Record<string, any>): {
+  trackGain?: number;
+  albumGain?: number;
+  trackPeak?: number;
+} {
+  const result: { trackGain?: number; albumGain?: number; trackPeak?: number } = {};
+
+  const trackGain = parseDbGain(common?.replaygain_track_gain);
+  if (trackGain !== undefined) result.trackGain = trackGain;
+
+  const albumGain = parseDbGain(common?.replaygain_album_gain);
+  if (albumGain !== undefined) result.albumGain = albumGain;
+
+  const trackPeak = parsePeakRatio(common?.replaygain_track_peak);
+  if (trackPeak !== undefined) result.trackPeak = trackPeak;
+
+  return result;
+}
+
 /**
  * Clean and normalize song titles from tags or raw filenames:
  * - Strips redundant nested audio extensions (".wav", ".m4a")
@@ -224,32 +265,11 @@ export async function parseAudioMetadata(filePath: string, layout?: FolderLayout
       (['flac', 'wav', 'alac', 'aiff', 'wavpack', 'monkeys audio', 'dsd'].includes((format.codec || '').toLowerCase()) ||
         losslessExtensions.includes(fileExt));
 
-    // ReplayGain extraction helper
-    const parseDbGain = (val: any): number | undefined => {
-      if (val === null || val === undefined) return undefined;
-      if (typeof val === 'number') return val;
-      if (typeof val === 'object' && typeof val.dB === 'number') return val.dB;
-      if (typeof val === 'string') {
-        const n = parseFloat(val.replace(/[^\d.-]/g, ''));
-        if (!isNaN(n)) return n;
-      }
-      return undefined;
-    };
-
-    const parsePeakRatio = (val: any): number | undefined => {
-      if (val === null || val === undefined) return undefined;
-      if (typeof val === 'number') return val;
-      if (typeof val === 'object' && typeof val.ratio === 'number') return val.ratio;
-      if (typeof val === 'string') {
-        const n = parseFloat(val);
-        if (!isNaN(n)) return n;
-      }
-      return undefined;
-    };
-
-    const replayGainTrackGain = parseDbGain((common as any).replaygain_track_gain);
-    const replayGainAlbumGain = parseDbGain((common as any).replaygain_album_gain);
-    const replayGainTrackPeak = parsePeakRatio((common as any).replaygain_track_peak);
+    const {
+      trackGain: replayGainTrackGain,
+      albumGain: replayGainAlbumGain,
+      trackPeak: replayGainTrackPeak,
+    } = parseReplayGain(common as Record<string, any>);
 
     let picture: { format: string; data: Buffer } | undefined = undefined;
     if (common.picture && common.picture.length > 0) {

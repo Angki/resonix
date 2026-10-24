@@ -103,7 +103,7 @@ export function buildAlbumSearch(search: string | undefined, field: SearchField)
 }
 
 export async function tracksRoutes(app: FastifyInstance) {
-  app.get('/', async (req) => {
+  app.get('/', async (req, reply) => {
     const query = req.query as {
       search?: string;
       searchField?: string;
@@ -124,6 +124,16 @@ export async function tracksRoutes(app: FastifyInstance) {
     };
 
     const userId = req.user?.id;
+
+    if (query.playlistId) {
+      if (!userId) return reply.status(401).send({ error: 'Auth required' });
+      const ownedPlaylist = await prisma.playlist.findFirst({
+        where: { id: query.playlistId, userId },
+        select: { id: true },
+      });
+      if (!ownedPlaylist) return reply.status(404).send({ error: 'Playlist not found' });
+    }
+
     const page = Math.max(1, parseInt(query.page || '1', 10));
     const limit = Math.min(10000, Math.max(1, parseInt(query.limit || '1000', 10)));
     const skip = (page - 1) * limit;
@@ -245,6 +255,9 @@ export async function tracksRoutes(app: FastifyInstance) {
           bitDepth: t.bitDepth,
           channels: t.channels,
           isLossless: Boolean(t.isLossless),
+          replayGainTrackGain: t.replayGainTrackGain !== null && t.replayGainTrackGain !== undefined ? Number(t.replayGainTrackGain) : null,
+          replayGainAlbumGain: t.replayGainAlbumGain !== null && t.replayGainAlbumGain !== undefined ? Number(t.replayGainAlbumGain) : null,
+          replayGainTrackPeak: t.replayGainTrackPeak !== null && t.replayGainTrackPeak !== undefined ? Number(t.replayGainTrackPeak) : null,
           artistId: t.artistId,
           artistName: t.artistName,
           albumId: t.albumId,
@@ -398,6 +411,9 @@ export async function tracksRoutes(app: FastifyInstance) {
         bitDepth: t.bitDepth,
         channels: t.channels,
         isLossless: t.isLossless,
+        replayGainTrackGain: t.replayGainTrackGain,
+        replayGainAlbumGain: t.replayGainAlbumGain,
+        replayGainTrackPeak: t.replayGainTrackPeak,
         artistId: t.artistId,
         artistName: t.artistName,
         albumId: t.albumId,

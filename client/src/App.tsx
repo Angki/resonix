@@ -1,7 +1,6 @@
 import React, { useEffect } from 'react';
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useUiStore } from './store/uiStore';
-import { usePlayerStore } from './store/playerStore';
 import { api } from './api/client';
 import { Track } from './types';
 
@@ -60,7 +59,6 @@ const MainLayout: React.FC = () => {
     setAuthModalOpen,
   } = useUiStore();
 
-  const { togglePlay, previous, next, seek, setVolume, volume, isMuted, toggleMute, currentTime } = usePlayerStore();
   const [offlineTracks, setOfflineTracks] = React.useState<Track[]>(() => offlineStorageService.getOfflineTracks());
 
   React.useEffect(() => {
@@ -110,12 +108,17 @@ const MainLayout: React.FC = () => {
   }, []);
 
 
-  // Query tracks with active filters
+  // Query tracks with active filters. Pages are fetched lazily so huge
+  // libraries don't download everything on first paint.
+  const TRACKS_PAGE_SIZE = 300;
   const {
     data: trackData,
     isLoading: tracksLoading,
     isFetching: tracksFetching,
-  } = useQuery({
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
     queryKey: [
       'tracks',
       activeSection,
@@ -129,12 +132,15 @@ const MainLayout: React.FC = () => {
       sortBy,
       sortOrder,
     ],
-    queryFn: () => {
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => {
       const params: Record<string, any> = {
         sortBy,
         sortOrder,
         search: searchQuery || undefined,
         searchField: searchField !== 'all' ? searchField : undefined,
+        page: pageParam,
+        limit: TRACKS_PAGE_SIZE,
       };
 
       if (selectedRootId && activeSection !== 'playlists') params.rootId = selectedRootId;
@@ -146,9 +152,18 @@ const MainLayout: React.FC = () => {
 
       return api.getTracks(params);
     },
+    getNextPageParam: (lastPage, allPages) => {
+      const loaded = allPages.reduce((sum, page) => sum + page.tracks.length, 0);
+      return loaded < lastPage.total ? allPages.length + 1 : undefined;
+    },
     placeholderData: (previousData) => previousData,
     staleTime: 1000 * 60 * 2,
   });
+
+  const tracks = React.useMemo(
+    () => trackData?.pages.flatMap((page) => page.tracks) ?? [],
+    [trackData]
+  );
 
   return (
     <div className="flex flex-col h-[100dvh] w-screen overflow-hidden bg-charcoal-950 text-zinc-200 select-none font-sans pb-[env(safe-area-inset-bottom)] relative">
@@ -179,9 +194,15 @@ const MainLayout: React.FC = () => {
             />
           ) : viewMode === 'table' ? (
             <TrackTable
-              tracks={trackData?.tracks || []}
+              tracks={tracks}
               isLoading={tracksLoading}
               isFetching={tracksFetching}
+              hasMore={Boolean(hasNextPage)}
+              isFetchingMore={isFetchingNextPage}
+              totalCount={trackData?.pages[0]?.total}
+              onLoadMore={() => {
+                if (hasNextPage && !isFetchingNextPage) fetchNextPage();
+              }}
             />
           ) : (
             <AlbumGrid />

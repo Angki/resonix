@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
-import { X, Copy, Check, FileAudio, Disc, Music, HardDrive, Cpu, Calendar, Clock, BarChart2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Copy, Check, FileAudio, Disc, Music, HardDrive, Cpu, Calendar, Clock, BarChart2, Download } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useUiStore } from '../store/uiStore';
+import { api } from '../api/client';
+import { StarRating } from './StarRating';
 
 function formatTime(sec?: number): string {
   if (!sec || isNaN(sec) || sec <= 0) return '0:00';
@@ -23,7 +26,13 @@ function formatFileSize(bytes?: number): string {
 
 export const TrackPropertiesModal: React.FC = () => {
   const { isTrackPropertiesOpen, propertiesTrack, closeTrackProperties } = useUiStore();
+  const queryClient = useQueryClient();
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [rating, setRating] = useState<number | null>(propertiesTrack?.rating ?? null);
+
+  useEffect(() => {
+    setRating(propertiesTrack?.rating ?? null);
+  }, [propertiesTrack?.id, propertiesTrack?.rating]);
 
   if (!isTrackPropertiesOpen || !propertiesTrack) return null;
 
@@ -33,6 +42,17 @@ export const TrackPropertiesModal: React.FC = () => {
     navigator.clipboard.writeText(text);
     setCopiedField(label);
     setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const handleRate = async (value: number | null) => {
+    const previous = rating;
+    setRating(value);
+    try {
+      await api.setRating(track.id, value);
+      queryClient.invalidateQueries({ queryKey: ['tracks'] });
+    } catch {
+      setRating(previous);
+    }
   };
 
   const handleCopyAll = () => {
@@ -74,12 +94,22 @@ export const TrackPropertiesModal: React.FC = () => {
             <FileAudio size={18} className="text-crimson-500" />
             <h2 className="font-semibold text-zinc-100 text-sm">Audio Track Properties & Tech Specs</h2>
           </div>
-          <button
-            onClick={closeTrackProperties}
-            className="p-1 text-zinc-400 hover:text-zinc-100 hover:bg-charcoal-800 rounded transition"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center space-x-1">
+            <a
+              href={api.getDownloadUrl(track.id)}
+              download
+              title="Download original audio file"
+              className="p-1 text-zinc-400 hover:text-cyan-300 hover:bg-charcoal-800 rounded transition"
+            >
+              <Download size={16} />
+            </a>
+            <button
+              onClick={closeTrackProperties}
+              className="p-1 text-zinc-400 hover:text-zinc-100 hover:bg-charcoal-800 rounded transition"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}
@@ -116,6 +146,12 @@ export const TrackPropertiesModal: React.FC = () => {
               <p className="text-zinc-500 truncate text-[11px]">
                 {track.albumTitle} {track.year ? `(${track.year})` : ''} • {track.genre || 'Metal / Ambient'}
               </p>
+              <div className="flex items-center gap-2 mt-1.5">
+                <StarRating rating={rating} onChange={handleRate} size={15} />
+                <span className="text-[10px] text-zinc-500">
+                  {rating ? `${rating / 20} / 5` : 'Not rated'}
+                </span>
+              </div>
             </div>
           </div>
 

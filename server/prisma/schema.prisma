@@ -106,6 +106,10 @@ model Track {
   isLossless           Boolean      @default(false)
   isUnavailable        Boolean      @default(false)
 
+  replayGainTrackGain  Float?
+  replayGainAlbumGain  Float?
+  replayGainTrackPeak  Float?
+
   artistId             String?
   artist               Artist?      @relation(fields: [artistId], references: [id], onDelete: SetNull)
   artistName           String       @default("Unknown Artist")

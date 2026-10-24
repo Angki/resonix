@@ -89,6 +89,10 @@ export async function healthRoutes(app: FastifyInstance) {
   });
 
   app.post('/health/verify', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to verify library files' });
+    }
+
     const schema = z.object({
       rootId: z.string().optional(),
       limit: z.coerce.number().int().positive().optional(),
@@ -115,6 +119,10 @@ export async function healthRoutes(app: FastifyInstance) {
   });
 
   app.post('/health/verify-artwork', async (req, reply) => {
+    if (req.user?.role !== 'admin') {
+      return reply.status(403).send({ error: 'Admin access required to verify artwork integrity' });
+    }
+
     const schema = z.object({
       limit: z.coerce.number().int().positive().optional(),
       offset: z.coerce.number().int().min(0).optional(),

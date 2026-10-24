@@ -65,6 +65,56 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: resonix:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Fresh Volume Migration & Readiness Smoke Test
+        run: |
+          docker volume create resonix-ci-data
+          docker run -d --name resonix-ci \
+            -p 3999:3000 \
+            -v resonix-ci-data:/data \
+            -e SESSION_SECRET="$(openssl rand -hex 32)" \
+            -e CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+            -e DEPLOYMENT_PROFILE=PERSONAL \
+            resonix:test
+
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3999/api/ready; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Container failed to become ready"
+            docker logs resonix-ci
+            exit 1
+          fi
+
+          curl -fsS http://127.0.0.1:3999/api/auth/status
+
+          # Restart on the same volume to prove migrations are idempotent and backups run
+          docker rm -f resonix-ci
+          docker run -d --name resonix-ci \
+            -p 3999:3000 \
+            -v resonix-ci-data:/data \
+            -e SESSION_SECRET="$(openssl rand -hex 32)" \
+            -e CREDENTIAL_ENCRYPTION_KEY="$(openssl rand -hex 32)" \
+            -e DEPLOYMENT_PROFILE=PERSONAL \
+            resonix:test
+
+          ready=0
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3999/api/ready; then ready=1; break; fi
+            sleep 2
+          done
+          if [ "$ready" != "1" ]; then
+            echo "Container failed to become ready after restart"
+            docker logs resonix-ci
+            exit 1
+          fi
+          docker exec resonix-ci sh -c 'ls /data/backups/library-*.db | head -n 1'
+
+          docker rm -f resonix-ci
+          docker volume rm resonix-ci-data

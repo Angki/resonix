@@ -15,5 +15,14 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          tanstack: ['@tanstack/react-query', '@tanstack/react-table', '@tanstack/react-virtual'],
+          icons: ['lucide-react'],
+          state: ['zustand'],
+        },
+      },
+    },
   },
 });

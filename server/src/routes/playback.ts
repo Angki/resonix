@@ -123,53 +123,59 @@ export async function playbackRoutes(app: FastifyInstance) {
     const userId = req.user?.id;
     if (!userId) return reply.status(401).send({ error: 'Auth required' });
 
-    const allUserStats = await prisma.userTrackStats.findMany({
-      where: { userId },
-      include: {
-        track: {
-          select: {
-            artistName: true,
-            albumTitle: true,
-            genre: true,
-            isLossless: true,
-            duration: true,
-          },
-        },
-      },
-    });
+    const [totalRows, artistRows, genreRows] = await Promise.all([
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN s.totalListeningTime > 0 THEN s.totalListeningTime ELSE s.playCount * COALESCE(t.duration, 180) END), 0) AS totalSeconds,
+           COALESCE(SUM(s.playCount), 0) AS totalPlays,
+           COALESCE(SUM(CASE WHEN t.isLossless = 1 THEN s.playCount ELSE 0 END), 0) AS losslessPlays,
+           COALESCE(SUM(CASE WHEN s.playCount > 0 THEN 1 ELSE 0 END), 0) AS uniqueTracks,
+           COUNT(DISTINCT CASE WHEN s.playCount > 0 THEN t.artistName END) AS uniqueArtists
+         FROM UserTrackStats s
+         LEFT JOIN Track t ON t.id = s.trackId
+         WHERE s.userId = ?`,
+        userId
+      ),
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT COALESCE(t.artistName, 'Unknown Artist') AS name,
+                SUM(s.playCount) AS playCount,
+                SUM(CASE WHEN s.totalListeningTime > 0 THEN s.totalListeningTime ELSE s.playCount * COALESCE(t.duration, 180) END) AS seconds
+         FROM UserTrackStats s
+         LEFT JOIN Track t ON t.id = s.trackId
+         WHERE s.userId = ?
+         GROUP BY COALESCE(t.artistName, 'Unknown Artist')
+         ORDER BY playCount DESC
+         LIMIT 8`,
+        userId
+      ),
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT t.genre AS genre, SUM(s.playCount) AS count
+         FROM UserTrackStats s
+         JOIN Track t ON t.id = s.trackId
+         WHERE s.userId = ? AND s.playCount > 0 AND t.genre IS NOT NULL AND t.genre <> ''
+         GROUP BY t.genre`,
+        userId
+      ),
+    ]);
 
-    let totalListeningSeconds = 0;
-    let totalPlays = 0;
-    let losslessPlays = 0;
-    const artistPlayMap: Record<string, { count: number; seconds: number }> = {};
+    const totals = totalRows[0] || {};
+    const totalListeningSeconds = Number(totals.totalSeconds) || 0;
+    const totalPlays = Number(totals.totalPlays) || 0;
+    const losslessPlays = Number(totals.losslessPlays) || 0;
+    const uniqueTracks = Number(totals.uniqueTracks) || 0;
+    const uniqueArtists = Number(totals.uniqueArtists) || 0;
+
+    const topArtists = artistRows.map((row) => ({
+      name: String(row.name),
+      playCount: Number(row.playCount) || 0,
+      minutes: Math.round((Number(row.seconds) || 0) / 60),
+    }));
+
     const genrePlayMap: Record<string, number> = {};
-
-    for (const stat of allUserStats) {
-      const listened = stat.totalListeningTime || (stat.playCount * (stat.track?.duration || 180));
-      totalListeningSeconds += listened;
-      totalPlays += stat.playCount;
-
-      if (stat.track?.isLossless) {
-        losslessPlays += stat.playCount;
-      }
-
-      const artist = stat.track?.artistName || 'Unknown Artist';
-      if (!artistPlayMap[artist]) {
-        artistPlayMap[artist] = { count: 0, seconds: 0 };
-      }
-      artistPlayMap[artist].count += stat.playCount;
-      artistPlayMap[artist].seconds += listened;
-
-      const genre = stat.track?.genre?.split(/[,;/]/)[0]?.trim();
-      if (genre && stat.playCount > 0) {
-        genrePlayMap[genre] = (genrePlayMap[genre] || 0) + stat.playCount;
-      }
+    for (const row of genreRows) {
+      const genre = String(row.genre).split(/[,;/]/)[0]?.trim();
+      if (genre) genrePlayMap[genre] = (genrePlayMap[genre] || 0) + (Number(row.count) || 0);
     }
-
-    const topArtists = Object.entries(artistPlayMap)
-      .map(([name, data]) => ({ name, playCount: data.count, minutes: Math.round(data.seconds / 60) }))
-      .sort((a, b) => b.playCount - a.playCount)
-      .slice(0, 8);
 
     const topGenres = Object.entries(genrePlayMap)
       .map(([name, count]) => ({ name, count }))
@@ -215,8 +221,8 @@ export async function playbackRoutes(app: FastifyInstance) {
     return {
       totalListeningHours: Number((totalListeningSeconds / 3600).toFixed(1)),
       totalPlays,
-      uniqueTracks: allUserStats.filter(s => s.playCount > 0).length,
-      uniqueArtists: Object.keys(artistPlayMap).filter(a => artistPlayMap[a].count > 0).length,
+      uniqueTracks,
+      uniqueArtists,
       losslessPercentage: totalPlays > 0 ? Math.round((losslessPlays / totalPlays) * 100) : 0,
       dailyActivity,
       topArtists,

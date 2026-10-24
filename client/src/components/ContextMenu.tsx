@@ -2,8 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Play, ListPlus, Radio, Star, FolderPlus, Info, Compass, FileAudio, Download, CheckCircle } from 'lucide-react';
 import { LastFmIcon } from './LastFmIcon';
+import { StarRating } from './StarRating';
 import { Track } from '../types';
 import { offlineStorageService } from '../services/offlineStorageService';
+import { api } from '../api/client';
 
 interface ContextMenuProps {
   x: number;
@@ -14,6 +16,7 @@ interface ContextMenuProps {
   onPlayNext: (tracks: Track[]) => void;
   onAddToQueue: (tracks: Track[]) => void;
   onToggleFavorite: (track: Track) => void;
+  onSetRating?: (track: Track, rating: number | null) => void;
   onAddToPlaylist?: (tracks: Track[]) => void;
   onShowDetails?: (track: Track) => void;
   onLocateAlbum?: (track: Track) => void;
@@ -30,6 +33,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   onPlayNext,
   onAddToQueue,
   onToggleFavorite,
+  onSetRating,
   onAddToPlaylist,
   onShowDetails,
   onLocateAlbum,
@@ -71,7 +75,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
   const primaryTrack = selectedTracks[0];
 
   const menuWidth = 220;
-  const menuHeight = 280;
+  const menuHeight = 420;
   const winWidth = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const winHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
 
@@ -134,6 +138,20 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         <span>{primaryTrack.isFavorite ? 'Remove Favorite' : 'Add to Favorites'}</span>
       </button>
 
+      {onSetRating && (
+        <div className="flex items-center justify-between px-3 py-1.5 hover:bg-charcoal-750/50 transition">
+          <span className="text-zinc-300">Rating</span>
+          <StarRating
+            rating={primaryTrack.rating}
+            size={13}
+            onChange={(value) => {
+              onSetRating(primaryTrack, value);
+              onClose();
+            }}
+          />
+        </div>
+      )}
+
       <button
         onClick={async () => {
           const isOff = offlineStorageService.isOffline(primaryTrack.id);
@@ -158,6 +176,16 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           </>
         )}
       </button>
+
+      <a
+        href={api.getDownloadUrl(primaryTrack.id)}
+        download
+        onClick={onClose}
+        className="w-full flex items-center space-x-2 px-3 py-1.5 hover:bg-charcoal-750 text-zinc-300 hover:text-zinc-100 transition"
+      >
+        <Download size={13} className="text-cyan-400" />
+        <span>Download Original File</span>
+      </a>
 
       {onAddToPlaylist && (
         <button

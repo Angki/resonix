@@ -26,6 +26,7 @@ import { useUiStore } from '../store/uiStore';
 import { useEqualizerStore, EQ_FREQUENCIES_10 } from '../store/equalizerStore';
 import { useVisualizerStore } from '../store/visualizerStore';
 import { audioVisualizerService } from '../services/audioVisualizerService';
+import { subscribeToSeek } from '../services/playbackBus';
 import { api } from '../api/client';
 import { PlayerContextMenu } from './PlayerContextMenu';
 import { LastFmIcon } from './LastFmIcon';
@@ -132,6 +133,24 @@ export const PlayerBar: React.FC = () => {
   const crossfadeTimerRef = useRef<any>(null);
   const watchdogTimerRef = useRef<any>(null);
   const thresholdReportedRef = useRef<boolean>(false);
+
+  // All seek UIs (mini player, mobile drawer, lyrics, visualizer, keyboard) go
+  // through the store; this is the only place that touches the audio element.
+  useEffect(() => {
+    return subscribeToSeek((seconds) => {
+      const audio = audioRef.current;
+      if (!audio) return false;
+      try {
+        const max = isFinite(audio.duration) && audio.duration > 0 ? audio.duration : seconds;
+        const clamped = Math.max(0, Math.min(seconds, max));
+        audio.currentTime = clamped;
+        lastTimeRef.current = clamped;
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  }, []);
 
   // Sleep Timer countdown effect
   useEffect(() => {
@@ -405,10 +424,18 @@ export const PlayerBar: React.FC = () => {
     }
 
     const targetFactor = Math.pow(10, totalGainDb / 20);
+    let limitedFactor = targetFactor;
+    if (isNormalizerEnabled && currentTrack) {
+      const peak = currentTrack.replayGainTrackPeak;
+      if (typeof peak === 'number' && isFinite(peak) && peak > 0) {
+        // Prevent clipping when positive ReplayGain pushes peaks above full scale
+        limitedFactor = Math.min(targetFactor, 1 / peak);
+      }
+    }
     try {
-      preAmpNode.gain.setTargetAtTime(targetFactor, ctx.currentTime, 0.05);
+      preAmpNode.gain.setTargetAtTime(limitedFactor, ctx.currentTime, 0.05);
     } catch {
-      preAmpNode.gain.value = targetFactor;
+      preAmpNode.gain.value = limitedFactor;
     }
   }, [isEqEnabled, eqPreAmp, isNormalizerEnabled, currentTrack]);
 
@@ -757,7 +784,7 @@ export const PlayerBar: React.FC = () => {
       !isAdvancingRef.current &&
       !isCrossfadingRef.current
     ) {
-      if (isCrossfadeEnabled && effDurationForWatchdog > (crossfadeSeconds || 3) + 2) {
+      if (isCrossfadeEnabled && repeatMode !== 'one' && effDurationForWatchdog > (crossfadeSeconds || 3) + 2) {
         const xfSec = Math.max(1, crossfadeSeconds || 3);
         if (cur >= effDurationForWatchdog - xfSec) {
           console.log(`[PlayerBar] Dual-Audio Crossfade triggered at ${cur.toFixed(1)}s / ${effDurationForWatchdog.toFixed(1)}s (window: ${xfSec}s)`);
@@ -1077,10 +1104,6 @@ export const PlayerBar: React.FC = () => {
 
   const handleSeekCommit = (val: number) => {
     setIsSeeking(false);
-    if (audioRef.current) {
-      audioRef.current.currentTime = val;
-      lastTimeRef.current = val;
-    }
     seek(val);
   };
 

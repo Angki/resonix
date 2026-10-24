@@ -29,6 +29,7 @@
     "db:migrate": "npm run db:migrate --workspace=server",
     "db:clean-metadata": "tsx server/src/scripts/clean_metadata.ts",
     "db:clean-metadata:dry": "tsx server/src/scripts/clean_metadata.ts --dry-run",
+    "db:backfill-replaygain": "npm run db:backfill-replaygain --workspace=server",
     "test": "npm run test --workspace=server"
   },
   "devDependencies": {

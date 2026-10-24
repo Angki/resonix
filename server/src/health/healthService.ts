@@ -420,6 +420,18 @@ const DUPLICATE_ARTIST_GROUP_SQL = `
   HAVING COUNT(*) > 1
 `;
 
+let duplicateGroupsCache: { at: number; rows: any[] } | null = null;
+const DUPLICATE_GROUPS_CACHE_MS = 60000;
+
+async function getDuplicateGroupRows(): Promise<any[]> {
+  if (duplicateGroupsCache && Date.now() - duplicateGroupsCache.at < DUPLICATE_GROUPS_CACHE_MS) {
+    return duplicateGroupsCache.rows;
+  }
+  const rows = await prisma.$queryRawUnsafe<any[]>(DUPLICATE_GROUP_SQL);
+  duplicateGroupsCache = { at: Date.now(), rows };
+  return rows;
+}
+
 const MISSING_ARTWORK_WHERE = `
   a.artworkId IS NULL
   AND EXISTS (SELECT 1 FROM Track t WHERE t.albumId = a.id AND t.isUnavailable = 0)
@@ -752,7 +764,7 @@ export async function getHealthIssueDetails(type: HealthIssueType, options: Heal
   }
 
   if (type === 'duplicates') {
-    const groupRows = await prisma.$queryRawUnsafe<any[]>(DUPLICATE_GROUP_SQL);
+    const groupRows = await getDuplicateGroupRows();
     const visible = groupRows
       .map((row) => ({
         nt: String(row.nt),
